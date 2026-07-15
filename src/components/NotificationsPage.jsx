@@ -18,6 +18,7 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
   const mine = cachedUserId === me?.id // 缓存归当前账号才用，换号则从空开始（防串号）
   const [mentions, setMentions] = useState(mine ? cachedMentions : []) // 别人 @ 我的（未完成）
   const [completions, setCompletions] = useState(mine ? cachedCompletions : []) // 我派的活、对方完成了（黄色）
+  const [operationError, setOperationError] = useState('')
 
   useEffect(() => {
     let alive = true
@@ -27,7 +28,12 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
   }, [me?.id])
 
   async function approve(p, ok) {
-    await supabase.rpc(ok ? 'approve_member' : 'reject_member', { p_id: p.id })
+    setOperationError('')
+    const { error } = await supabase.rpc(ok ? 'approve_member' : 'reject_member', { p_id: p.id })
+    if (error) {
+      setOperationError(ok ? '成员通过失败，请重试。' : '成员拒绝失败，请重试。')
+      return
+    }
     onMembersChanged?.()
   }
 
@@ -41,15 +47,27 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
   // 已完成的下次刷新会被 loadMyMentions 自动清掉，不长期堆积。
   async function complete(m) {
     if (m.completed_at) return
-    setMentions((xs) => xs.map((x) => (x.id === m.id ? { ...x, completed_at: new Date().toISOString() } : x)))
-    try { await completeMention(m.id) } catch {}
+    setOperationError('')
+    try {
+      await completeMention(m.id)
+      setMentions((xs) => xs.map((x) => (x.id === m.id ? { ...x, completed_at: new Date().toISOString() } : x)))
+    } catch {
+      setOperationError('标记完成失败，请重试。')
+      return
+    }
     onChanged?.() // 落库后刷新侧栏未完成计数（本地划横线不动，靠这个让红点数字当场减）
   }
 
   // 点掉黄色完成通知
   async function dismiss(c) {
-    setCompletions((xs) => xs.filter((x) => x.id !== c.id))
-    try { await ackCompletion(c.id) } catch {}
+    setOperationError('')
+    try {
+      await ackCompletion(c.id)
+      setCompletions((xs) => xs.filter((x) => x.id !== c.id))
+    } catch {
+      setOperationError('关闭通知失败，请重试。')
+      return
+    }
     onChanged?.()
   }
 
@@ -60,6 +78,8 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
       <div className="mb-3 flex items-center gap-2 text-[15px] font-semibold max-md:text-[17px]">
         <Bell size={16} /> 通知
       </div>
+
+      {operationError && <p className="mb-3 text-sm text-red-600">{operationError}</p>}
 
       {empty && (
         <p className="mt-6 text-sm text-stone-300 max-md:text-[15px]">

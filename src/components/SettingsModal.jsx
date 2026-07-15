@@ -58,7 +58,10 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
 
   // 邀请名单：读取 + 添加邮箱 + 移除
   useEffect(() => {
-    supabase.from('allowed_emails').select('*').order('created_at').then(({ data }) => setAllowed(data || []))
+    supabase.from('allowed_emails').select('*').order('created_at').then(({ data, error }) => {
+      if (error) setInviteErr('邀请名单加载失败，请稍后重试。')
+      else setAllowed(data || [])
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -95,7 +98,12 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
   }
 
   async function removeEmail(em) {
-    await supabase.from('allowed_emails').delete().eq('email', em)
+    setInviteErr('')
+    const { error } = await supabase.from('allowed_emails').delete().eq('email', em)
+    if (error) {
+      setInviteErr('移出邀请名单失败，请重试。')
+      return
+    }
     setAllowed((a) => a.filter((x) => x.email !== em))
   }
 

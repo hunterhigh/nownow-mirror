@@ -25,7 +25,14 @@ const SECTIONS = [
 ]
 
 const LAST_VIEWED_KEY = 'nownow_last_viewed'
-const loadLastViewed = () => JSON.parse(localStorage.getItem(LAST_VIEWED_KEY) || '{}')
+const loadLastViewed = () => {
+  try {
+    const value = JSON.parse(localStorage.getItem(LAST_VIEWED_KEY) || '{}')
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  } catch {
+    return {}
+  }
+}
 
 // 首次进入：凭邀请链接起名进入（没有邀请 = 进不来）
 // 侧栏成员行：直接按住名字拖动排序（顺序存本地，纯个人视图偏好，不进数据库）

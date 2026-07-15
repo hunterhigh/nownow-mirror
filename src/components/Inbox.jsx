@@ -73,22 +73,34 @@ export default function Inbox({ me, profiles, onJumpDoc, scope = null }) {
     onJumpDoc?.(m.owner, m.section, m.periodKey, m.tagId)
   }
 
-  function complete(m) {
-    setItems((xs) => xs.filter((x) => x.id !== m.id)) // 乐观移除
-    cachedItems = cachedItems.filter((x) => x.id !== m.id) // 缓存同步，重挂不闪回这条
-    completeMention(m.id).catch(() => {})
+  async function complete(m) {
+    try {
+      await completeMention(m.id)
+      setItems((xs) => xs.filter((x) => x.id !== m.id))
+      cachedItems = cachedItems.filter((x) => x.id !== m.id)
+    } catch {
+      alert('标记完成失败，请重试。')
+    }
   }
 
-  function dismissMention(m) {
-    setItems((xs) => xs.filter((x) => x.id !== m.id)) // 乐观移除
-    cachedItems = cachedItems.filter((x) => x.id !== m.id)
-    markMentionRead(m.id).catch(() => {})
+  async function dismissMention(m) {
+    try {
+      await markMentionRead(m.id)
+      setItems((xs) => xs.filter((x) => x.id !== m.id))
+      cachedItems = cachedItems.filter((x) => x.id !== m.id)
+    } catch {
+      alert('删除通知失败，请重试。')
+    }
   }
 
-  function dismissDone(c) {
-    setDone((xs) => xs.filter((x) => x.id !== c.id)) // 乐观移除
-    cachedDone = cachedDone.filter((x) => x.id !== c.id)
-    ackCompletion(c.id).catch(() => {})
+  async function dismissDone(c) {
+    try {
+      await ackCompletion(c.id)
+      setDone((xs) => xs.filter((x) => x.id !== c.id))
+      cachedDone = cachedDone.filter((x) => x.id !== c.id)
+    } catch {
+      alert('关闭通知失败，请重试。')
+    }
   }
 
   return (
