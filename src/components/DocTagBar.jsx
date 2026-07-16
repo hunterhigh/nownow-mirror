@@ -43,6 +43,12 @@ export default function DocTagBar({ tags, selectedId, editable, ready, onSelect,
       await onCreate(name)
       setDraft('')
       setCreating(false)
+    } catch (error) {
+      alert(error?.message || '标签创建失败，请重试。')
+      requestAnimationFrame(() => {
+        inputRef.current?.focus()
+        inputRef.current?.select()
+      })
     } finally {
       committingRef.current = false
     }
@@ -67,6 +73,12 @@ export default function DocTagBar({ tags, selectedId, editable, ready, onSelect,
       await onRename(editingId, name)
       setEditingId(null)
       setRenameDraft('')
+    } catch (error) {
+      alert(error?.message || '标签重命名失败，请重试。')
+      requestAnimationFrame(() => {
+        inputRef.current?.focus()
+        inputRef.current?.select()
+      })
     } finally {
       committingRef.current = false
     }

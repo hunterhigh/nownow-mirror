@@ -466,7 +466,7 @@ export default function Board({ session }) {
       selectDocTag(tag.id)
       updateTagOrder(next.filter((item) => item.tagId).map((item, index) => ({ ...item, id: item.tagId, sort_order: index }))).catch(() => {})
     } catch (e) {
-      alert(e?.message || '标签创建失败')
+      throw new Error(friendlyDbError(e))
     }
   }, [channel, docTagsInScope, docTagsReadyInScope, isMyPage, me?.id, selectDocTag])
 
@@ -486,7 +486,7 @@ export default function Board({ session }) {
         selectDocTag(null)
         setDocRefreshNonce((n) => n + 1)
       } catch (e) {
-        alert(e?.message || '删除标签失败')
+        alert(friendlyDbError(e) || '删除标签失败')
       }
     },
     [channel, docTagsInScope, isMyPage, me?.id, selectDocTag],
@@ -504,7 +504,7 @@ export default function Board({ session }) {
         setDocTags(next)
         selectDocTag(tagId)
       } catch (e) {
-        alert(e?.message || '标签重命名失败')
+        throw new Error(friendlyDbError(e))
       }
     },
     [channel, docTagsInScope, isMyPage, me?.id, selectDocTag],
