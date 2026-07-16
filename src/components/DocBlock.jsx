@@ -24,9 +24,9 @@ function stripBlobImages(node) {
 // 时间线里的一个文档块 = 一个 (owner, section, period_key)。
 // 当前周期可写（防抖 600ms 自动落库；永不丢字 + 离线韧性，见 resilientDocs）；过去/别人的只读。
 // fill=当前周期块铺满首屏（点空白也能落光标编辑）。
-export default function DocBlock({ owner, section, periodKey, editable, placeholder, profiles, mentionFreq, mentionStates, fill, onCarry }) {
+export default function DocBlock({ owner, section, periodKey, tagId = null, editable, placeholder, profiles, mentionFreq, mentionStates, fill, onCarry }) {
   // 初值同步读缓存：命中就直接拿来当初值、不经 undefined 占位 → 缓存命中零加载闪（暂存等再点秒显）。
-  const [content, setContent] = useState(() => peekDocCache(owner, section, periodKey)) // undefined=加载中, null=空, obj=PM JSON
+  const [content, setContent] = useState(() => peekDocCache(owner, section, periodKey, tagId)) // undefined=加载中, null=空, obj=PM JSON
   const [saveState, setSaveState] = useState(null) // 'saving'|'saved'|'offline'|'error'|null
   const saveTimer = useRef(null)
   const savedClear = useRef(null)
@@ -42,8 +42,8 @@ export default function DocBlock({ owner, section, periodKey, editable, placehol
   useEffect(() => {
     let alive = true
     // 切块时也先用缓存（命中=不闪），miss 才回到 undefined 占位
-    setContent(peekDocCache(owner, section, periodKey))
-    loadDocResilient(owner, section, periodKey)
+    setContent(peekDocCache(owner, section, periodKey, tagId))
+    loadDocResilient(owner, section, periodKey, tagId)
       .then((j) => alive && setContent(j ?? null))
       .catch(() => alive && setContent(null))
     return () => {
@@ -54,11 +54,11 @@ export default function DocBlock({ owner, section, periodKey, editable, placehol
       // 否则 600ms 内切页会丢这次存。payload 已剔 blob、存的是安全内容；不带 onState 避免卸载后 setState。
       if (pendingSave.current) { saveDocResilient(pendingSave.current); pendingSave.current = null }
     }
-  }, [owner, section, periodKey])
+  }, [owner, section, periodKey, tagId])
 
   if (content === undefined) {
-    // 加载中静默占位（不显示"加载中…"文字，避免开屏闪一下文案再变幽灵字）；留点高度防跳动
-    return <div className="min-h-[1.75rem]" aria-hidden />
+    // 加载中静默占位。当前周期块保持和编辑器相同高度，避免切标签 cache miss 时页面先塌再展开。
+    return <div className={fill ? 'doc-editor doc-editor-fill' : 'min-h-[1.75rem]'} aria-hidden />
   }
 
   return (
@@ -69,7 +69,7 @@ export default function DocBlock({ owner, section, periodKey, editable, placehol
         </div>
       )}
       <DocEditor
-        key={`${owner}/${section}/${periodKey}`}
+        key={`${owner}/${section}/${periodKey}/${tagId || 'default'}`}
         content={content || undefined}
         editable={editable}
         fill={fill && editable}
@@ -83,7 +83,7 @@ export default function DocBlock({ owner, section, periodKey, editable, placehol
           if (!editable) return
           // blob: 预览图不入库（见文件顶部注释）；其余正文照存，永不丢字。上传完换公网地址那次会正常带图存。
           const safeJson = hasBlobImage(json) ? stripBlobImages(json) : json
-          const payload = { owner, section, periodKey, json: safeJson, text }
+          const payload = { owner, section, periodKey, tagId, json: safeJson, text }
           pendingSave.current = payload
           clearTimeout(saveTimer.current)
           saveTimer.current = setTimeout(() => {

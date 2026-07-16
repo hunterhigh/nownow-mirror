@@ -211,6 +211,12 @@ a:focus-visible,
 .paper-scroll {
   overscroll-behavior: contain; /* 滚到头不把弹性带给整页 */
 }
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
 /* 手机：滚动条整个隐藏（滚动不受影响），界面只留内容 */
 @media (max-width: 767px) {
   .paper-scroll {

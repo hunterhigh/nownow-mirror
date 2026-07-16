@@ -7,12 +7,14 @@ import { supabase } from './lib/supabase'
 import { friendlyDbError } from './lib/errors'
 import { inPeriod, offsetOf, periodHeader, periodRange } from './lib/period'
 import { loadMyMentions, loadMyCompletions, loadMentionFrequency, loadMyMentionStates } from './lib/docMentionsApi'
-import { warmCache } from './lib/resilientDocs'
+import { forgetDocCacheForTags, warmCache } from './lib/resilientDocs'
 import { periodKey } from './lib/periodKey'
+import { archiveTag, createTag as createDocTag, loadDocTags, peekDocTags, rememberDocTags, renameTag as renameDocTag, updateTagOrder } from './lib/tagsApi'
 import Inbox from './components/Inbox'
 import NotificationsPage from './components/NotificationsPage'
 import DocTimeline from './components/DocTimeline'
 import DocSearch from './components/DocSearch'
+import DocTagBar from './components/DocTagBar'
 import SettingsModal from './components/SettingsModal'
 
 const SECTIONS = [
@@ -23,7 +25,14 @@ const SECTIONS = [
 ]
 
 const LAST_VIEWED_KEY = 'nownow_last_viewed'
-const loadLastViewed = () => JSON.parse(localStorage.getItem(LAST_VIEWED_KEY) || '{}')
+const loadLastViewed = () => {
+  try {
+    const value = JSON.parse(localStorage.getItem(LAST_VIEWED_KEY) || '{}')
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  } catch {
+    return {}
+  }
+}
 
 // 首次进入：凭邀请链接起名进入（没有邀请 = 进不来）
 // 侧栏成员行：直接按住名字拖动排序（顺序存本地，纯个人视图偏好，不进数据库）
@@ -152,6 +161,8 @@ export default function Board({ session }) {
     () => profiles.filter((p) => p.status !== 'pending'),
     [profiles],
   )
+  const pageUser = profiles.find((p) => p.id === pageUserId) || me
+  const isMyPage = !!pageUser && !!me && pageUser.id === me.id
   const [myInviteTokens, setMyInviteTokens] = useState([])
 
   const [query, setQuery] = useState('') // 顶部搜索：直接输入、就地过滤 todolist
@@ -161,10 +172,31 @@ export default function Board({ session }) {
   const [flashDoc, setFlashDoc] = useState(null) // @通知跳转后落地高亮的文档块 {section, periodKey}
   const [editRequest, setEditRequest] = useState(null) // 跨区接力：让某个区的第一条进入编辑
   const [channel, setChannel] = useState('today') // 当前频道：today/week/month/stash（一次只看一个）
+  const [docTags, setDocTags] = useState([])
+  const [docTagsReady, setDocTagsReady] = useState(false)
+  const [selectedTagId, setSelectedTagId] = useState(null)
+  const [docTagsScope, setDocTagsScope] = useState('')
+  const [docRefreshNonce, setDocRefreshNonce] = useState(0)
+  const requestedTagRef = useRef(null)
+  const currentDocTagsScope = pageUserId ? `${pageUserId}:${channel}` : ''
+  const currentDocTagsScopeRef = useRef(currentDocTagsScope)
+  currentDocTagsScopeRef.current = currentDocTagsScope
+  const docTagsScopeMatches = docTagsScope === currentDocTagsScope
+  const cachedDocTagsInScope = pageUserId ? peekDocTags(pageUserId, channel) : undefined
+  const docTagsInScope = docTagsScopeMatches ? docTags : (cachedDocTagsInScope || [])
+  const docTagsReadyInScope = docTagsScopeMatches ? docTagsReady : cachedDocTagsInScope !== undefined
+  const selectedTagIdInScope = docTagsScopeMatches ? selectedTagId : null
+  const selectedTag = useMemo(
+    () => docTagsInScope.find((tag) => tag.id === selectedTagIdInScope) || null,
+    [docTagsInScope, selectedTagIdInScope],
+  )
+  const selectedDocTagId = selectedTag?.tagId || null
   // 每个频道各自的时间回看偏移（负=往前看）。‹ › 挪到了顶部频道标签旁，offset 上提到这里统一管
   const [offsets, setOffsets] = useState({})
   const channelOffset = offsets[channel] || 0
   const goChannel = useCallback((key) => {
+    requestedTagRef.current = null
+    setSelectedTagId(null)
     setChannel(key)
     setOffsets((o) => ({ ...o, [key]: 0 })) // 点标签名字 = 切到该频道并回到当前
   }, [])
@@ -361,8 +393,149 @@ export default function Board({ session }) {
   useEffect(() => {
     if (!activeProfiles.length) return
     const key = periodKey(channel, 0, baseDate)
-    warmCache(activeProfiles.map((p) => ({ owner: p.id, section: channel, periodKey: key })))
-  }, [activeProfiles, channel, baseDate])
+    warmCache(activeProfiles.map((p) => ({ owner: p.id, section: channel, periodKey: key, tagId: selectedDocTagId })))
+  }, [activeProfiles, channel, baseDate, selectedDocTagId])
+
+  useEffect(() => {
+    if (!pageUserId || !docTagsReadyInScope) return
+    const key = periodKey(channel, 0, baseDate)
+    warmCache([
+      { owner: pageUserId, section: channel, periodKey: key, tagId: null },
+      ...docTagsInScope.map((tag) => ({ owner: pageUserId, section: channel, periodKey: key, tagId: tag.tagId })),
+    ])
+  }, [pageUserId, channel, baseDate, docTagsInScope, docTagsReadyInScope])
+
+  useEffect(() => {
+    if (!pageUserId) {
+      setDocTagsScope('')
+      setDocTags([])
+      setDocTagsReady(false)
+      setSelectedTagId(null)
+      return
+    }
+    let alive = true
+    const scope = currentDocTagsScope
+    const requested = requestedTagRef.current
+    const requestedMatches = requested?.owner === pageUserId && requested?.section === channel
+    const requestedTagId = requestedMatches ? requested.tagId : null
+    if (requestedMatches) requestedTagRef.current = null
+    const cachedTags = peekDocTags(pageUserId, channel)
+    setDocTagsScope(scope)
+    setDocTags(cachedTags || [])
+    setDocTagsReady(cachedTags !== undefined)
+    setSelectedTagId(requestedTagId)
+    loadDocTags(pageUserId, channel)
+      .then(({ tags, ready }) => {
+        if (!alive) return
+        setDocTagsScope(scope)
+        setDocTags(tags)
+        setDocTagsReady(ready)
+        if (requestedTagId && !tags.some((tag) => tag.id === requestedTagId)) {
+          setSelectedTagId(null)
+        }
+      })
+      .catch(() => {
+        if (!alive) return
+        setDocTags([])
+        setDocTagsReady(false)
+        setSelectedTagId(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [pageUserId, channel, currentDocTagsScope])
+
+  const selectDocTag = useCallback(
+    (tagId) => {
+      requestedTagRef.current = null
+      setSelectedTagId(tagId)
+    },
+    [],
+  )
+
+  const createTag = useCallback(async (name) => {
+    if (!isMyPage) return
+    if (!docTagsReadyInScope) {
+      alert('标签数据层还没准备好，稍后再试。')
+      return
+    }
+    if (!name?.trim()) return
+    try {
+      const tag = await createDocTag(me.id, channel, name, docTagsInScope.length)
+      const next = [...docTagsInScope, tag]
+      rememberDocTags(me.id, channel, next)
+      setDocTags(next)
+      selectDocTag(tag.id)
+    } catch (e) {
+      throw new Error(friendlyDbError(e))
+    }
+  }, [channel, docTagsInScope, docTagsReadyInScope, isMyPage, me?.id, selectDocTag])
+
+  const deleteTag = useCallback(
+    async (tagId) => {
+      if (!isMyPage || !tagId) return
+      const tag = docTagsInScope.find((item) => item.id === tagId)
+      if (!tag) return
+      const ok = window.confirm(`删除标签「${tag.name}」后，里面的内容会回到未选标签，不会丢。`)
+      if (!ok) return
+      try {
+        await archiveTag(tagId)
+        forgetDocCacheForTags(me.id, channel, [null, tag.tagId])
+        const next = docTagsInScope.filter((item) => item.id !== tagId)
+        rememberDocTags(me.id, channel, next)
+        setDocTags(next)
+        selectDocTag(null)
+        setDocRefreshNonce((n) => n + 1)
+      } catch (e) {
+        alert(friendlyDbError(e) || '删除标签失败')
+      }
+    },
+    [channel, docTagsInScope, isMyPage, me?.id, selectDocTag],
+  )
+
+  const reorderTags = useCallback(
+    async (activeId, overId) => {
+      if (!isMyPage || !docTagsReadyInScope || activeId === overId) return
+      const from = docTagsInScope.findIndex((item) => item.id === activeId)
+      const to = docTagsInScope.findIndex((item) => item.id === overId)
+      if (from < 0 || to < 0) return
+
+      const scope = currentDocTagsScope
+      const previous = docTagsInScope
+      const next = arrayMove(previous, from, to).map((item, index) => ({ ...item, sort_order: index }))
+      rememberDocTags(me.id, channel, next)
+      setDocTags(next)
+
+      try {
+        await updateTagOrder(channel, next)
+      } catch (e) {
+        if (currentDocTagsScopeRef.current === scope) {
+          rememberDocTags(me.id, channel, previous)
+          setDocTags(previous)
+        }
+        throw new Error(friendlyDbError(e))
+      }
+    },
+    [channel, currentDocTagsScope, docTagsInScope, docTagsReadyInScope, isMyPage, me?.id],
+  )
+
+  const renameTag = useCallback(
+    async (tagId, name) => {
+      if (!isMyPage || !tagId || !name?.trim()) return
+      const tag = docTagsInScope.find((item) => item.id === tagId)
+      if (!tag || tag.name === name.trim()) return
+      try {
+        const renamed = await renameDocTag(tagId, name)
+        const next = docTagsInScope.map((item) => (item.id === tagId ? renamed : item))
+        rememberDocTags(me.id, channel, next)
+        setDocTags(next)
+        selectDocTag(tagId)
+      } catch (e) {
+        throw new Error(friendlyDbError(e))
+      }
+    },
+    [channel, docTagsInScope, isMyPage, me?.id, selectDocTag],
+  )
 
   // Realtime 增量应用：别人的改动按行打补丁，不整表重拉（30 人规模的流量关键）
   // 自己有写操作在路上时不动本地（防旧事件盖新状态），靠落定后的对账兜底
@@ -396,8 +569,10 @@ export default function Board({ session }) {
 
   // @通知跳转入口（给 Inbox/通知页用）：点一条 → 切到那人那频道、滚到那篇文档块
   // block id = `doc-${section}-${periodKey}`（见 DocTimeline）
-  const jumpToDoc = useCallback((owner, section, periodKey) => {
+  const jumpToDoc = useCallback((owner, section, periodKey, tagId = null) => {
+    requestedTagRef.current = { owner, section, tagId: tagId || null }
     viewPage(owner)
+    setSelectedTagId(tagId || null)
     setChannel(section)
     setQuery('')
     // 定位到「@我」那个 mention 节点本身、滚过去并高亮它（而不是整块变蓝）。
@@ -655,9 +830,6 @@ export default function Board({ session }) {
       </div>
     )
 
-  const pageUser = profiles.find((p) => p.id === pageUserId) || me
-  const isMyPage = pageUser.id === me.id
-
   // 侧栏内容：桌面常驻左栏 + 手机左侧抽屉（flomo 式）共用一份
   const sidebarContent = (
     <>
@@ -866,47 +1038,60 @@ export default function Board({ session }) {
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col pl-5 pr-3 md:px-6">
-        <div className="shrink-0 pb-4 pt-3 max-md:pb-2 max-md:pt-1">
+        <div className="shrink-0 pb-2 pt-2 max-md:pb-1.5 max-md:pt-1">
           {/* 顶部 今日/本周/本月/收集箱 = 切换视图（一次看一个，高亮当前）。每个频道在下方渲染成往下回溯的时间线。右侧=搜索（桌面） */}
           {view === 'paper' && (
-          <div className="flex items-center gap-1.5">
-            {SECTIONS.map((s) => (
-              <button
-                key={s.key}
-                onClick={() => goChannel(s.key)}
-                className={
-                  'rounded-full px-3.5 py-1.5 text-[14px] leading-none transition-colors ' +
-                  (channel === s.key
-                    ? 'bg-[var(--nav-soft)] font-medium text-stone-900'
-                    : 'text-stone-500 hover:bg-[var(--nav-soft)] hover:text-stone-900')
-                }
-              >
-                {s.label}
-              </button>
-            ))}
-            <span className="relative ml-auto hidden items-center md:flex">
-              <Search size={16} strokeWidth={2.5} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-400" />
-              <input
-                id="search-input"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    setQuery('')
-                    e.target.blur()
+          <>
+            <div className="flex items-center gap-1.5">
+              {SECTIONS.map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => goChannel(s.key)}
+                  className={
+                    'flex h-7 items-center rounded-full px-3 text-[14px] leading-none transition-colors ' +
+                    (channel === s.key
+                      ? 'bg-[var(--nav-soft)] text-stone-900'
+                      : 'text-stone-500 hover:bg-[var(--nav-soft)] hover:text-stone-900')
                   }
-                }}
-                className="h-9 w-[230px] rounded-md bg-stone-200/80 pl-9 pr-2 text-[14px] outline-none focus:bg-stone-200"
-              />
-              {!query && (
-                <kbd className="pointer-events-none absolute left-9 top-1/2 flex -translate-y-1/2 items-center font-medium text-stone-400">
-                  {/* ⌘ 字形天生比字母小（字体度量问题），单独放大让它和 K 视觉等大 */}
-                  <span className="text-[20px] leading-none">⌘</span>
-                  <span className="text-[15px]">+K</span>
-                </kbd>
-              )}
-            </span>
-          </div>
+                >
+                  {s.label}
+                </button>
+              ))}
+              <span className="relative ml-auto hidden items-center md:flex">
+                <Search size={16} strokeWidth={2.5} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-400" />
+                <input
+                  id="search-input"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      setQuery('')
+                      e.target.blur()
+                    }
+                  }}
+                  className="h-8 w-[230px] rounded-md bg-stone-200/80 pl-9 pr-2 text-[14px] outline-none focus:bg-stone-200"
+                />
+                {!query && (
+                  <kbd className="pointer-events-none absolute left-9 top-1/2 flex -translate-y-1/2 items-center font-medium text-stone-400">
+                    {/* ⌘ 字形天生比字母小（字体度量问题），单独放大让它和 K 视觉等大 */}
+                    <span className="text-[20px] leading-none">⌘</span>
+                    <span className="text-[15px]">+K</span>
+                  </kbd>
+                )}
+              </span>
+            </div>
+            <DocTagBar
+              tags={docTagsInScope}
+              selectedId={selectedTagIdInScope}
+              editable={isMyPage}
+              ready={docTagsReadyInScope}
+              onSelect={selectDocTag}
+              onCreate={createTag}
+              onRename={renameTag}
+              onDelete={deleteTag}
+              onReorder={reorderTags}
+            />
+          </>
           )}
           {/* 看别人主页时不再显示「X的主页（只读）/回到我的主页」横条——那块留给时间戳，和自己主页一样（回到自己页走侧栏点自己名字）*/}
           {/* 独立输入框已删除 → 改为纸即输入：频道底部常驻幽灵行（见 Section） */}
@@ -924,6 +1109,14 @@ export default function Board({ session }) {
         </div>
         {/* -ml-6 pl-6：把左侧 24px（拖把手的悬浮区）包进容器内，配合 overflow-x-hidden 不被裁掉 */}
         <div ref={scrollRef} className="paper-scroll -ml-6 flex-1 overflow-y-auto overflow-x-hidden pb-2 pl-6 pr-3">
+          {isMyPage && view === 'paper' && (
+            <Inbox
+              me={me}
+              profiles={profiles}
+              onJumpDoc={jumpToDoc}
+              scope={{ section: channel, periodKey: periodKey(channel, 0, baseDate) }}
+            />
+          )}
           {/* 所有视图统一收进 720px 主列（--doc-width）：通知/设置/正文同一阅读宽，
              左对齐和上方 tab/日期头同边界，折叠侧栏时跟着撑到左边 */}
           <div className="w-full max-w-[var(--doc-width)]">
@@ -947,15 +1140,34 @@ export default function Board({ session }) {
               />
             ) : (
               <>
-                {isMyPage && view === 'paper' && <Inbox me={me} profiles={profiles} onJumpDoc={jumpToDoc} />}
                 {query.trim() ? (
                   <DocSearch
                     query={query}
                     profiles={profiles}
-                    onJump={(h) => { viewPage(h.owner); goChannel(h.section); setQuery('') }}
+                    onJump={(h) => {
+                      requestedTagRef.current = { owner: h.owner, section: h.section, tagId: h.tag_id || null }
+                      viewPage(h.owner)
+                      setSelectedTagId(h.tag_id || null)
+                      setChannel(h.section)
+                      setOffsets((o) => ({ ...o, [h.section]: 0 }))
+                      setQuery('')
+                    }}
                   />
                 ) : (
-                  <DocTimeline key={`${pageUserId}-${channel}`} owner={pageUserId} section={channel} isMyPage={isMyPage} baseDate={baseDate} viewportH={viewportH} profiles={profiles} mentionFreq={mentionFreq} mentionStates={mentionStates} flashKey={flashDoc && flashDoc.section === channel ? flashDoc.periodKey : null} />
+                  <DocTimeline
+                    key={`${pageUserId}-${channel}`}
+                    owner={pageUserId}
+                    section={channel}
+                    tagId={selectedDocTagId}
+                    isMyPage={isMyPage}
+                    baseDate={baseDate}
+                    viewportH={viewportH}
+                    profiles={profiles}
+                    mentionFreq={mentionFreq}
+                    mentionStates={mentionStates}
+                    flashKey={flashDoc && flashDoc.section === channel ? flashDoc.periodKey : null}
+                    refreshNonce={docRefreshNonce}
+                  />
                 )}
               </>
             )}

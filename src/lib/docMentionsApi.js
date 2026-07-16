@@ -2,7 +2,7 @@
 // 写入在 docsApi.saveDoc 后的 syncDocMentions；这里只读 + 标已读。
 import { supabase } from './supabase'
 
-// 我收到的 @：join docs 拿 (owner, section, period_key) 用于跳转/上下文。降序。
+// 我收到的 @：join docs 拿 (owner, section, period_key, tag_id) 用于跳转/上下文。降序。
 export async function loadMyMentions() {
   // getSession（读本地缓存、无网络）取 user，别用 getUser（每次都打一次 auth 服务器网络往返）。
   // 通知页每次进入会多处调这俩(Board refreshNotif + NotificationsPage)，getUser 的网络往返叠起来
@@ -14,7 +14,7 @@ export async function loadMyMentions() {
   if (!user) return []
   const { data, error } = await supabase
     .from('doc_mentions')
-    .select('id, doc_id, author, created_at, read_at, completed_at, snippet, docs_visible!inner(owner, section, period_key)')
+    .select('id, doc_id, author, created_at, read_at, completed_at, snippet, docs_visible!inner(owner, section, period_key, tag_id)')
     .eq('mentioned', user.id)
     .order('created_at', { ascending: false })
   if (error) throw error
@@ -28,6 +28,7 @@ export async function loadMyMentions() {
     owner: m.docs_visible.owner,
     section: m.docs_visible.section,
     periodKey: m.docs_visible.period_key,
+    tagId: m.docs_visible.tag_id ?? null,
   }))
 }
 
@@ -57,7 +58,7 @@ export async function loadMyCompletions() {
   if (!user) return []
   const { data, error } = await supabase
     .from('doc_mentions')
-    .select('id, mentioned, completed_at, snippet, docs_visible!inner(owner, section, period_key)')
+    .select('id, mentioned, completed_at, snippet, docs_visible!inner(owner, section, period_key, tag_id)')
     .eq('author', user.id)
     .not('completed_at', 'is', null)
     .is('completion_seen_at', null)
@@ -71,6 +72,7 @@ export async function loadMyCompletions() {
     owner: m.docs_visible.owner,
     section: m.docs_visible.section,
     periodKey: m.docs_visible.period_key,
+    tagId: m.docs_visible.tag_id ?? null,
   }))
 }
 

@@ -11,6 +11,7 @@
 # 产物：backups/nownow-YYYYMMDD-HHMMSS.dump（自定义压缩格式），默认保留最近 14 份。
 # 恢复：pg_restore --clean --if-exists -d "$NOWNOW_DB_URL" backups/那个.dump
 set -euo pipefail
+umask 077
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$HERE/.backup-env"
