@@ -77,12 +77,12 @@ export async function listTags(owner, section) {
   return tags
 }
 
-export async function createTag(owner, section, name) {
+export async function createTag(owner, section, name, sortOrder = 0) {
   const clean = name.trim()
   if (!clean) throw new Error('标签名不能为空')
   const { data, error } = await supabase
     .from('doc_tags')
-    .insert({ owner, section, name: clean })
+    .insert({ owner, section, name: clean, sort_order: sortOrder })
     .select('id, owner, section, name, sort_order, archived_at, created_at, updated_at')
     .single()
   if (error) throw error
@@ -102,17 +102,18 @@ export async function renameTag(id, name) {
   return normalizeTag(data)
 }
 
-export async function updateTagOrder(items) {
+export async function updateTagOrder(section, items) {
   if (!Array.isArray(items) || items.length === 0) return
-  const now = new Date().toISOString()
-  for (const item of items) {
-    if (!item?.id) continue
-    const { error } = await supabase
-      .from('doc_tags')
-      .update({ sort_order: item.sort_order, updated_at: now })
-      .eq('id', item.id)
-    if (error) throw error
-  }
+  const tagIds = items
+    .slice()
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((item) => item.id)
+    .filter(Boolean)
+  const { error } = await supabase.rpc('reorder_doc_tags', {
+    p_section: section,
+    p_tag_ids: tagIds,
+  })
+  if (error) throw error
 }
 
 // Phase 1 删除=归档标签，并把该标签下的内容移回默认标签，避免内容跟着隐藏。

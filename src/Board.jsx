@@ -179,6 +179,8 @@ export default function Board({ session }) {
   const [docRefreshNonce, setDocRefreshNonce] = useState(0)
   const requestedTagRef = useRef(null)
   const currentDocTagsScope = pageUserId ? `${pageUserId}:${channel}` : ''
+  const currentDocTagsScopeRef = useRef(currentDocTagsScope)
+  currentDocTagsScopeRef.current = currentDocTagsScope
   const docTagsScopeMatches = docTagsScope === currentDocTagsScope
   const cachedDocTagsInScope = pageUserId ? peekDocTags(pageUserId, channel) : undefined
   const docTagsInScope = docTagsScopeMatches ? docTags : (cachedDocTagsInScope || [])
@@ -459,12 +461,11 @@ export default function Board({ session }) {
     }
     if (!name?.trim()) return
     try {
-      const tag = await createDocTag(me.id, channel, name)
+      const tag = await createDocTag(me.id, channel, name, docTagsInScope.length)
       const next = [...docTagsInScope, tag]
       rememberDocTags(me.id, channel, next)
       setDocTags(next)
       selectDocTag(tag.id)
-      updateTagOrder(next.filter((item) => item.tagId).map((item, index) => ({ ...item, id: item.tagId, sort_order: index }))).catch(() => {})
     } catch (e) {
       throw new Error(friendlyDbError(e))
     }
@@ -490,6 +491,32 @@ export default function Board({ session }) {
       }
     },
     [channel, docTagsInScope, isMyPage, me?.id, selectDocTag],
+  )
+
+  const reorderTags = useCallback(
+    async (activeId, overId) => {
+      if (!isMyPage || !docTagsReadyInScope || activeId === overId) return
+      const from = docTagsInScope.findIndex((item) => item.id === activeId)
+      const to = docTagsInScope.findIndex((item) => item.id === overId)
+      if (from < 0 || to < 0) return
+
+      const scope = currentDocTagsScope
+      const previous = docTagsInScope
+      const next = arrayMove(previous, from, to).map((item, index) => ({ ...item, sort_order: index }))
+      rememberDocTags(me.id, channel, next)
+      setDocTags(next)
+
+      try {
+        await updateTagOrder(channel, next)
+      } catch (e) {
+        if (currentDocTagsScopeRef.current === scope) {
+          rememberDocTags(me.id, channel, previous)
+          setDocTags(previous)
+        }
+        throw new Error(friendlyDbError(e))
+      }
+    },
+    [channel, currentDocTagsScope, docTagsInScope, docTagsReadyInScope, isMyPage, me?.id],
   )
 
   const renameTag = useCallback(
@@ -1062,6 +1089,7 @@ export default function Board({ session }) {
               onCreate={createTag}
               onRename={renameTag}
               onDelete={deleteTag}
+              onReorder={reorderTags}
             />
           </>
           )}

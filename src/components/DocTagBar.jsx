@@ -1,7 +1,39 @@
 import { useEffect, useRef, useState } from 'react'
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
+import { SortableContext, horizontalListSortingStrategy, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { MoreHorizontal, Plus } from 'lucide-react'
 
-export default function DocTagBar({ tags, selectedId, editable, ready, onSelect, onCreate, onRename, onDelete }) {
+function SortableTag({ tag, active, disabled, onSelect }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: tag.id,
+    disabled,
+  })
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      {...attributes}
+      {...listeners}
+      onClick={() => onSelect(active ? null : tag.id)}
+      style={{ transform: CSS.Transform.toString(transform), transition, touchAction: 'pan-y' }}
+      title={disabled ? undefined : '拖动调整顺序'}
+      className={
+        'flex h-6 shrink-0 items-center rounded-full px-3 text-[13px] leading-none transition-colors ' +
+        (!disabled ? 'cursor-grab active:cursor-grabbing ' : '') +
+        (isDragging ? 'z-10 opacity-70 shadow-sm ' : '') +
+        (active
+          ? 'bg-[var(--nav-soft)] text-stone-900'
+          : 'text-stone-500 hover:bg-[var(--nav-soft)] hover:text-stone-900')
+      }
+    >
+      {tag.name}
+    </button>
+  )
+}
+
+export default function DocTagBar({ tags, selectedId, editable, ready, onSelect, onCreate, onRename, onDelete, onReorder }) {
   const [creating, setCreating] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState('')
@@ -10,8 +42,13 @@ export default function DocTagBar({ tags, selectedId, editable, ready, onSelect,
   const menuRef = useRef(null)
   const inputRef = useRef(null)
   const committingRef = useRef(false)
+  const dragSelectGuardRef = useRef(false)
+  const [reordering, setReordering] = useState(false)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
   const mainTag = { id: null, name: 'main', system: true }
-  const items = [mainTag, ...tags]
   const hasCustomTags = tags.length > 0
   const selectedCustomIndex = tags.findIndex((tag) => tag.id === selectedId)
 
@@ -99,46 +136,81 @@ export default function DocTagBar({ tags, selectedId, editable, ready, onSelect,
     setRenameDraft(tag.name)
   }
 
+  async function handleDragEnd({ active, over }) {
+    try {
+      if (over && active.id !== over.id && !reordering) {
+        setReordering(true)
+        await onReorder(active.id, over.id)
+      }
+    } catch (error) {
+      alert(error?.message || '标签排序保存失败，请重试。')
+    } finally {
+      setReordering(false)
+      window.setTimeout(() => { dragSelectGuardRef.current = false }, 0)
+    }
+  }
+
+  function selectCustomTag(tagId) {
+    if (dragSelectGuardRef.current) return
+    onSelect(tagId)
+  }
+
   return (
     <div className="mt-1.5 flex min-w-0 items-center gap-1.5">
       <div className="no-scrollbar flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
-        {items.map((tag) => {
-          const active = selectedId === tag.id
-          if (!tag.system && editingId === tag.id) {
-            return (
-              <form key={tag.id} onSubmit={submitRename} className="shrink-0">
-                <input
-                  ref={inputRef}
-                  value={renameDraft}
-                  onChange={(e) => setRenameDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') {
-                      setEditingId(null)
-                      setRenameDraft('')
-                    }
-                  }}
-                  onBlur={commitRename}
-                  className="h-6 w-24 rounded-full border border-stone-200 bg-white px-3 text-[13px] text-stone-800 outline-none focus:border-stone-300"
-                />
-              </form>
-            )
+        <button
+          type="button"
+          onClick={() => onSelect(null)}
+          className={
+            'flex h-6 shrink-0 items-center rounded-full px-3 text-[13px] leading-none transition-colors ' +
+            (selectedId === mainTag.id
+              ? 'bg-[var(--nav-soft)] text-stone-900'
+              : 'text-stone-500 hover:bg-[var(--nav-soft)] hover:text-stone-900')
           }
-          return (
-            <button
-              key={tag.id || 'main'}
-              type="button"
-              onClick={() => onSelect(tag.system ? null : (active ? null : tag.id))}
-              className={
-                'flex h-6 shrink-0 items-center rounded-full px-3 text-[13px] leading-none transition-colors ' +
-                (active
-                  ? 'bg-[var(--nav-soft)] text-stone-900'
-                  : 'text-stone-500 hover:bg-[var(--nav-soft)] hover:text-stone-900')
+        >
+          {mainTag.name}
+        </button>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={() => { dragSelectGuardRef.current = true }}
+          onDragCancel={() => { dragSelectGuardRef.current = false }}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext items={tags.map((tag) => tag.id)} strategy={horizontalListSortingStrategy}>
+            {tags.map((tag) => {
+              const active = selectedId === tag.id
+              if (editingId === tag.id) {
+                return (
+                  <form key={tag.id} onSubmit={submitRename} className="shrink-0">
+                    <input
+                      ref={inputRef}
+                      value={renameDraft}
+                      onChange={(e) => setRenameDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          setEditingId(null)
+                          setRenameDraft('')
+                        }
+                      }}
+                      onBlur={commitRename}
+                      className="h-6 w-24 rounded-full border border-stone-200 bg-white px-3 text-[13px] text-stone-800 outline-none focus:border-stone-300"
+                    />
+                  </form>
+                )
               }
-            >
-              {tag.name}
-            </button>
-          )
-        })}
+              return (
+                <SortableTag
+                  key={tag.id}
+                  tag={tag}
+                  active={active}
+                  disabled={!editable || !ready || reordering || creating || !!editingId}
+                  onSelect={selectCustomTag}
+                />
+              )
+            })}
+          </SortableContext>
+        </DndContext>
         {creating && (
           <form onSubmit={submitDraft} className="shrink-0">
             <input
