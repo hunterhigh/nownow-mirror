@@ -12,6 +12,10 @@ declare
   supplied_count integer;
   distinct_count integer;
 begin
+  if auth.uid() is null then
+    raise exception 'authentication required' using errcode = '42501';
+  end if;
+
   if p_section not in ('today', 'week', 'month', 'stash') then
     raise exception 'invalid document tag section';
   end if;
@@ -54,4 +58,5 @@ end;
 $$;
 
 revoke all on function public.reorder_doc_tags(text, uuid[]) from public;
+revoke all on function public.reorder_doc_tags(text, uuid[]) from anon;
 grant execute on function public.reorder_doc_tags(text, uuid[]) to authenticated;
