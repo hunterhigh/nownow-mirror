@@ -190,8 +190,9 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
                   {m.snippet ? (
                     <>
                       <div className="truncate" style={{ color: dim ? 'var(--ink-muted)' : 'var(--ink)' }}>{m.snippet}</div>
+                      {/* 区头已说明这是 @；每条只留 谁 · 什么时候，不再重复"@了你" */}
                       <div className="mt-0.5 truncate text-[11.5px]" style={{ color: 'var(--ink-faint)' }}>
-                        <b style={{ color: 'var(--ink-muted)' }}>{who}</b> @了你 · {ctx}
+                        <b style={{ color: 'var(--ink-muted)' }}>{who}</b> · {ctx}
                       </div>
                     </>
                   ) : (
@@ -219,12 +220,14 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
           {completions.map((c) => {
             const who = profiles?.find((p) => p.id === c.mentioned)?.display_name || '有人'
             const ctx = c.section === 'stash' ? '收集箱' : periodHeaderFromKey(c.section, c.periodKey)
+            // pl-6 = 蓝区方框(16px)+间距(8px)：两个区的文本列左缘对齐，扫起来是一条线
             return (
-              <div key={c.id} className="flex items-start gap-2 py-1 text-[13.5px] max-md:py-1.5 max-md:text-[15.5px]">
+              <div key={c.id} className="flex items-start gap-2 py-1 pl-6 text-[13.5px] max-md:py-1.5 max-md:text-[15.5px]">
                 <div className="min-w-0 flex-1">
                   <div className="truncate" style={{ color: 'var(--ink)' }}>{c.snippet || '（无内容）'}</div>
+                  {/* 区头已说明这是"已完成"；每条只留 谁 · 什么时候 */}
                   <div className="mt-0.5 truncate text-[11.5px]" style={{ color: 'var(--ink-faint)' }}>
-                    <b style={{ color: 'var(--ink-muted)' }}>{who}</b> 处理了你 @ 的事 · {ctx}
+                    <b style={{ color: 'var(--ink-muted)' }}>{who}</b> · {ctx}
                   </div>
                 </div>
                 <button onClick={() => ackDone(c)} title="知道了" aria-label="知道了" className="mt-0.5 shrink-0 text-stone-400 hover:text-stone-600">
