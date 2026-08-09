@@ -74,14 +74,14 @@ export default function FeedbackPage({ me, profiles }) {
           placeholder="使用感受、bug、想要的功能……都可以写在这里"
           rows={3}
           maxLength={2000}
-          className="w-full resize-none bg-transparent text-[13.5px] leading-relaxed outline-none placeholder:text-stone-300 max-md:text-[15px]"
+          className="w-full resize-none bg-transparent text-[13.5px] leading-relaxed outline-none placeholder:text-stone-400 max-md:text-[15px]"
         />
         <div className="mt-1 flex items-center">
-          <span className="text-[11px] text-stone-300">⌘+Enter 也可以提交</span>
+          <span className="text-[11px] text-stone-400">⌘+Enter 也可以提交</span>
           <button
             onClick={send}
             disabled={submitting || !draft.trim()}
-            className="ml-auto flex h-7 items-center gap-1 rounded-full bg-[var(--nav-soft)] px-3 text-[13px] text-stone-600 transition-colors hover:text-stone-900 disabled:opacity-40"
+            className="ml-auto flex h-7 items-center gap-1 rounded-full bg-[var(--nav-soft)] px-3 text-[13px] text-stone-600 transition-colors hover:text-stone-900 disabled:opacity-70"
           >
             <MessageSquarePlus size={14} /> {submitting ? '提交中…' : '提交反馈'}
           </button>
@@ -89,7 +89,7 @@ export default function FeedbackPage({ me, profiles }) {
       </div>
 
       {feedback.length === 0 && (
-        <p className="mt-6 text-sm text-stone-300 max-md:text-[15px]">
+        <p className="mt-6 text-sm text-stone-400 max-md:text-[15px]">
           还没有反馈。用着不顺手的地方、想要的功能，写下来大家都能看到。
         </p>
       )}
