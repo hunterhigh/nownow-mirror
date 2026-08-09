@@ -15,14 +15,23 @@ function snippet(text, q) {
 // docs 全文搜索结果：搜 doc_text，点一条跳到那个人那个频道
 export default function DocSearch({ query, profiles, onJump }) {
   const [hits, setHits] = useState(null)
+  // 防抖 + 至少两个字符再查。
+  // 之前是每敲一个键就发一次请求，而每次请求都是对 docs_visible 做 ilike '%q%'
+  // ——那一列是 CASE 表达式，索引用不上，必然全表扫。打「会议」= 2 次全表扫，
+  // 打一个英文单词 = 5 次以上。单字符查询还几乎匹配所有文档。
   useEffect(() => {
     let alive = true
+    const q = (query || '').trim()
+    if (q.length < 2) { setHits([]); return () => { alive = false } }
     setHits(null)
-    searchDocs(query)
-      .then((r) => alive && setHits(r))
-      .catch(() => alive && setHits([]))
+    const timer = setTimeout(() => {
+      searchDocs(q)
+        .then((r) => alive && setHits(r))
+        .catch(() => alive && setHits([]))
+    }, 250)
     return () => {
       alive = false
+      clearTimeout(timer)
     }
   }, [query])
 

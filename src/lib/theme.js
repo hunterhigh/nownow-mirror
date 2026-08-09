@@ -64,3 +64,22 @@ export function toggleTheme() {
 export function initTheme() {
   applyTheme('light')
 }
+
+
+/**
+ * iOS 软键盘的高度，写进 --kb-inset 供 CSS 用。
+ *
+ * iOS 上键盘是**盖**在页面上的，dvh 不会因此变小 —— 所以在长笔记底部打字时，
+ * 光标会被键盘挡住，而且不会自动滚上来。这是主力使用场景里的日常摩擦。
+ */
+export function installKeyboardInset() {
+  if (typeof window === 'undefined' || !window.visualViewport) return
+  const vv = window.visualViewport
+  const apply = () => {
+    const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+    document.documentElement.style.setProperty('--kb-inset', `${Math.round(inset)}px`)
+  }
+  vv.addEventListener('resize', apply)
+  vv.addEventListener('scroll', apply)
+  apply()
+}

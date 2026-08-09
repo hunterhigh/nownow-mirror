@@ -33,7 +33,7 @@ export default function CarryHandle({ editor, onCarry }) {
       onNodeChange={onNodeChange}
       computePositionConfig={positionConfig}
     >
-      <button type="button" className="doc-carry-handle" title="搬到今天" onClick={carry}>
+      <button type="button" className="doc-carry-handle" title="搬到今天" aria-label="搬到今天" onClick={carry}>
         <ArrowUp size={14} strokeWidth={2.2} />
       </button>
     </DragHandle>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { periodHeader } from '../lib/period'
 import { periodHeaderFromKey, periodKey } from '../lib/periodKey'
 import { listPeriods, moveBlockToToday } from '../lib/docsApi'
+import { forgetDocCacheFor } from '../lib/resilientDocs'
 import DocBlock from './DocBlock'
 
 const PERIOD_CACHE_PREFIX = 'nownow_periodcache:'
@@ -43,7 +44,7 @@ export default function DocTimeline({ owner, section, tagId = null, isMyPage, ba
   const [reloadNonce, setReloadNonce] = useState(0) // 搬块后 bump → 当前块+过去块重挂、读已更新缓存
   const refreshRef = useRef(refreshNonce)
 
-  // 搬块后刷新：重拉 pastKeys（源块搬空了会消失）+ 重挂块显示新内容（moveBlockToToday 已更新缓存）
+  // 搬块后刷新：重拉 pastKeys（源块搬空了会消失）+ 重挂块显示新内容（缓存由 carry 里显式作废）
   const refresh = useCallback(() => {
     const scope = currentPastKeysScope
     listPeriods(owner, section, tagId)
@@ -61,7 +62,14 @@ export default function DocTimeline({ owner, section, tagId = null, isMyPage, ba
   const carry = useCallback(
     (fromPeriod, blockIndex) => {
       moveBlockToToday({ owner, fromSection: section, fromPeriod, fromTagId: tagId, blockIndex, toSection: section, toPeriod: curKey, toTagId: tagId })
-        .then(() => refresh())
+        .then(() => {
+          // 两边的读缓存都要作废 —— moveBlockToToday 直接写库，压根不认识这个缓存。
+          // 不清的话：屏幕上看起来"什么都没发生"（两边都还是旧缓存），
+          // 而用户再去编辑那个"还在原地"的块，会把它整篇写回去，变成一块内容两份。
+          forgetDocCacheFor(owner, section, fromPeriod, tagId)
+          forgetDocCacheFor(owner, section, curKey, tagId)
+          refresh()
+        })
         .catch((e) => {
           console.error('搬到今天失败', e)
           alert('搬动失败了，可能内容刚被改过——刷新一下再试。')

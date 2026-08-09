@@ -1,5 +1,7 @@
 import { Component, useEffect, useState } from 'react'
 import { supabase } from './lib/supabase'
+import { installGlobalReporting, report } from './lib/report'
+import { installKeyboardInset } from './lib/theme'
 import Login from './Login'
 import Board from './Board'
 
@@ -8,6 +10,10 @@ class ErrorBoundary extends Component {
   state = { err: null }
   static getDerivedStateFromError(err) {
     return { err }
+  }
+  // 白屏是最沉默的故障：用户只会看到一个错误页，然后关掉。至少让它留个痕。
+  componentDidCatch(err, info) {
+    report('render', err, { componentStack: String(info?.componentStack || '').slice(0, 1000) })
   }
   render() {
     if (!this.state.err) return this.props.children
@@ -26,6 +32,9 @@ class ErrorBoundary extends Component {
 }
 
 // 整个产品就两个页面：登录页 + 主页面（首次起名是主页面里的一张卡）
+installGlobalReporting()
+installKeyboardInset()
+
 const INVITE_KEY = 'nownow_invite'
 const APP_ENV = import.meta.env.VITE_APP_ENV || 'production'
 const AUTH_BOOT_TIMEOUT_MS = 12_000

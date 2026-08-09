@@ -3,6 +3,9 @@ import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from 
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Bell, ChevronLeft, ChevronRight, CircleCheck, Menu, PanelLeftClose, PanelLeftOpen, Pin, PinOff, Search, Settings } from 'lucide-react'
+import { loadRecentActivity } from './lib/docsApi'
+import { report } from './lib/report'
+import AvatarPicker, { avatarSrc } from './components/AvatarPicker'
 import { supabase } from './lib/supabase'
 import { friendlyDbError } from './lib/errors'
 import { inPeriod, offsetOf, periodHeader, periodRange } from './lib/period'
@@ -56,7 +59,7 @@ function SortableMemberRow({ p, isMe, active, news, pinned, onClick, onTogglePin
           {isMe ? '（我）' : ''}
         </span>
       </button>
-      {news && <span className="ml-1 h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title="有新动态" />}
+      {news && <span className="ml-1 h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title="有新动态" aria-label="有新动态" />}
       {/* 置顶/取消置顶：纯图标、只在 hover 出现（置顶态本身靠分组「置顶成员」体现，按钮不常驻）。
           未置顶=📌(Pin)、已置顶=斜线📌(PinOff)。个人偏好、存本地。 */}
       <button
@@ -393,7 +396,9 @@ export default function Board({ session }) {
   useEffect(() => {
     if (!activeProfiles.length) return
     const key = periodKey(channel, 0, baseDate)
-    warmCache(activeProfiles.map((p) => ({ owner: p.id, section: channel, periodKey: key, tagId: selectedDocTagId })))
+    // 只预热"看得见的那些人"。原来是对全部 80 位成员各发一次文档查询 ——
+      // 在国内经 /sb 代理，这一波会和用户自己那篇文档抢带宽，正是"点开慢"的一大来源。
+      warmCache(activeProfiles.slice(0, 12).map((p) => ({ owner: p.id, section: channel, periodKey: key, tagId: selectedDocTagId })))
   }, [activeProfiles, channel, baseDate, selectedDocTagId])
 
   useEffect(() => {
@@ -593,13 +598,38 @@ export default function Board({ session }) {
     setTimeout(locate, 160)
   }, [viewPage, user.id])
 
+  // 谁最近写过东西 —— 红点的数据源。
+  // 原来读的是 allEntries，而 entries 模型下线后它恒为空数组，
+  // 所以这个红点已经**永远不会亮**了很久，界面上却看不出来。
+  const [avatarOpen, setAvatarOpen] = useState(false)
+  const [recentActivity, setRecentActivity] = useState({})
+  useEffect(() => {
+    let alive = true
+    loadRecentActivity().then((m) => alive && setRecentActivity(m)).catch(() => {})
+    return () => { alive = false }
+  }, [pageUserId, channel])
+
+  // 网站图标跟着自己选的头像走 —— 海涛要的"网页里的 logo 也同步"。
+  // index.html 里那个 <link rel="icon"> 初始指向默认头像，这里改的是同一个节点。
+  useEffect(() => {
+    const href = avatarSrc(me?.avatar)
+    let link = document.querySelector("link[rel~='icon']")
+    if (!link) {
+      link = document.createElement('link')
+      link.rel = 'icon'
+      document.head.appendChild(link)
+    }
+    link.href = href
+  }, [me?.avatar])
+
   const hasNews = useCallback(
     (p) => {
       if (!me || p.id === me.id || p.id === pageUserId) return false
       const seen = lastViewed[p.id] || '1970-01-01'
-      return allEntries.some((e) => e.owner === p.id && !e.is_private && e.updated_at > seen)
+      const latest = recentActivity[p.id]
+      return Boolean(latest && latest > seen)
     },
-    [me, pageUserId, lastViewed, allEntries],
+    [me, pageUserId, lastViewed, recentActivity],
   )
 
   const pageEntries = useMemo(
@@ -691,7 +721,7 @@ export default function Board({ session }) {
     // 去了别的页面就退出搜索模式并清空关键词（必须放在 view 声明之后：deps 数组在渲染时求值）
     setMobileSearch(false)
     setQuery('')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [view, pageUserId])
   const searchBoxRef = useRef(null)
   useEffect(() => {
@@ -705,7 +735,7 @@ export default function Board({ session }) {
     }
     document.addEventListener('pointerdown', h)
     return () => document.removeEventListener('pointerdown', h)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [mobileSearch])
 
   // 成员显示顺序：本人默认第一位，拖拽可调，存本地
@@ -791,7 +821,7 @@ export default function Board({ session }) {
   if (me && me.status === 'pending')
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center">
-        <img src="/logo.png" alt="" className="w-14 rounded-lg" />
+        <img src={avatarSrc(me?.avatar)} alt="" className="w-14 rounded-[9px]" />
         <p className="text-stone-700">你好 {me.display_name}，已收到你的加入申请</p>
         <p className="text-sm text-stone-400">等待邀请人确认后自动进入，这个页面不用刷新</p>
         <button onClick={() => supabase.auth.signOut()} className="mt-2 text-xs text-stone-300 hover:text-stone-500">
@@ -834,8 +864,39 @@ export default function Board({ session }) {
   const sidebarContent = (
     <>
         {/* 顶部：logo + 用户名（桌面）／日期（手机抽屉头） */}
-        <div className="mb-4 flex items-center gap-2 px-2.5 py-1.5 text-[17px] font-bold max-md:text-[21px]">
-          <img src="/logo.png" alt="" className="h-7 w-7 rounded-md max-md:hidden" />
+        {/* gap 用 2.5（10px）而不是 2（8px）：名字是 17px，10px ≈ 0.6em ——
+            图标与其文字标签之间的常用区间是 0.5–0.75em，8px 落在下沿所以显挤。
+            相对头像（24px）也约是 0.4 倍，是紧凑并列里比较稳的一档。 */}
+        <div className="mb-4 flex items-center gap-2.5 px-2.5 py-1.5 text-[17px] font-bold max-md:text-[21px]">
+          {/* 头像即入口：点一下换头像。同一张图也是网站的 favicon（见下面的 effect）。 */}
+          <span className="relative max-md:hidden">
+            <button
+              onClick={() => setAvatarOpen((v) => !v)}
+              title="换个头像"
+              aria-label="换个头像"
+              className="block cursor-pointer rounded-md"
+            >
+              <img src={avatarSrc(me.avatar)} alt="" className="block h-6 w-6 rounded-[4px]" />
+            </button>
+            {avatarOpen && (
+              <AvatarPicker
+                current={me.avatar}
+                onClose={() => setAvatarOpen(false)}
+                onPick={async (id) => {
+                  // 先本地生效（换头像应当是立刻的），落库失败再退回去。
+                  const prev = me.avatar ?? null
+                  setProfiles((xs) => xs.map((p) => (p.id === me.id ? { ...p, avatar: id } : p)))
+                  const { error } = await supabase.from('profiles').update({ avatar: id }).eq('id', me.id)
+                  if (error) {
+                    // 静默回退等于"点了没反应" —— 用户无从判断是没点中还是存失败了。
+                    setProfiles((xs) => xs.map((p) => (p.id === me.id ? { ...p, avatar: prev } : p)))
+                    report('avatar', error)
+                    alert('头像没保存上，稍后再试。')
+                  }
+                }}
+              />
+            )}
+          </span>
           <span className="truncate max-md:hidden">{me.display_name}</span>
           <span className="truncate md:hidden">
             {(baseDate || new Date()).getMonth() + 1}月{(baseDate || new Date()).getDate()}日
@@ -844,19 +905,19 @@ export default function Board({ session }) {
           <button
             onClick={() => setSidebarCollapsed(true)}
             className="ml-auto hidden shrink-0 rounded p-1 text-stone-400 hover:bg-[var(--nav-soft)] hover:text-stone-600 md:block"
-            title="收起侧栏"
+            title="收起侧栏" aria-label="收起侧栏"
           >
             <PanelLeftClose size={18} />
           </button>
           {/* 手机：通知/设置收进右侧（flomo 式抽屉头），点击进对应整页 */}
           <span className="-mr-2.5 ml-auto flex items-center gap-0.5 md:hidden">
-            <button onClick={() => setView('notifications')} className="relative p-1.5 text-stone-500" title="通知">
+            <button onClick={() => setView('notifications')} className="relative p-1.5 text-stone-500" title="通知" aria-label="通知">
               <Bell size={22} />
               {notifCount > 0 && (
                 <span className="absolute right-0.5 top-0.5 rounded-full bg-red-500 px-1 text-[10px] font-medium leading-[14px] text-white">{notifCount}</span>
               )}
             </button>
-            <button onClick={() => setView('settings')} className="p-1.5 text-stone-500" title="设置">
+            <button onClick={() => setView('settings')} className="p-1.5 text-stone-500" title="设置" aria-label="设置">
               <Settings size={22} />
             </button>
           </span>
@@ -963,7 +1024,7 @@ export default function Board({ session }) {
           <button
             onClick={() => setSidebarCollapsed(false)}
             className="mt-1.5 rounded p-1.5 text-stone-400 hover:bg-[var(--nav-soft)] hover:text-stone-600"
-            title="展开侧栏"
+            title="展开侧栏" aria-label="展开侧栏"
           >
             <PanelLeftOpen size={18} />
           </button>
@@ -976,7 +1037,7 @@ export default function Board({ session }) {
         <div
           onMouseDown={startSidebarResize}
           className="relative hidden w-px shrink-0 cursor-col-resize bg-stone-100 md:block"
-          title="拖动调整侧栏宽度"
+          title="拖动调整侧栏宽度" aria-label="拖动调整侧栏宽度"
         >
           {/* 透明热区（左右各 4px）只为好抓住那条 1px 线，悬停不再显示灰条——Haitao：选中条太粗 */}
           <div className="absolute inset-y-0 -left-1 -right-1" />
@@ -1016,7 +1077,7 @@ export default function Board({ session }) {
             </span>
           ) : (
             <>
-              <button onClick={() => setDrawerOpen(true)} className="relative p-1.5 text-stone-600" title="菜单">
+              <button onClick={() => setDrawerOpen(true)} className="relative p-1.5 text-stone-600" title="菜单" aria-label="菜单">
                 <Menu size={20} />
                 {inboxCount + notifCount > 0 && <span className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-red-500" />}
               </button>

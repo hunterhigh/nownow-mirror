@@ -361,7 +361,7 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
         <span className="relative">
           <button
             type="button"
-            title="字体 / 背景颜色"
+            title="字体 / 背景颜色" aria-label="字体 / 背景颜色"
             onMouseDown={(e) => { e.preventDefault(); setColorPanel((v) => !v) }}
             className={'flex h-7 items-center gap-0.5 rounded-md px-1 hover:bg-stone-100 hover:text-stone-900 ' + (colorPanel ? 'bg-stone-200 text-stone-900' : '')}
           >
@@ -375,7 +375,7 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
             >
               <div className="mb-1.5 text-[11px] text-stone-400">字体颜色</div>
               <div className="flex flex-wrap gap-1">
-                <button type="button" title="默认" onClick={() => editor.chain().focus().unsetColor().run()} className="flex h-6 w-6 items-center justify-center rounded-md border border-stone-200 hover:bg-stone-100">
+                <button type="button" title="默认" aria-label="默认" onClick={() => editor.chain().focus().unsetColor().run()} className="flex h-6 w-6 items-center justify-center rounded-md border border-stone-200 hover:bg-stone-100">
                   <span className="text-[13px] font-bold leading-none text-[var(--ink)]">A</span>
                 </button>
                 {TEXT_COLORS.map((c) => (
@@ -386,7 +386,7 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
               </div>
               <div className="mb-1.5 mt-2.5 text-[11px] text-stone-400">背景颜色</div>
               <div className="flex flex-wrap gap-1">
-                <button type="button" title="无" onClick={() => editor.chain().focus().unsetHighlight().run()} className="flex h-6 w-6 items-center justify-center rounded-md border border-stone-200 hover:bg-stone-100">
+                <button type="button" title="无" aria-label="无" onClick={() => editor.chain().focus().unsetHighlight().run()} className="flex h-6 w-6 items-center justify-center rounded-md border border-stone-200 hover:bg-stone-100">
                   <span className="text-[12px] leading-none text-stone-300">/</span>
                 </button>
                 {HL_COLORS.map((c) => (

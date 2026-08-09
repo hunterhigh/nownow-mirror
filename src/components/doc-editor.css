@@ -458,3 +458,41 @@
   height: 0;
   pointer-events: none;
 }
+
+/* ── 触屏：把只在 hover 时才出现的操作变成够得着的 ──
+   ⬆️「搬到今天」靠 drag-handle 的 mousemove 定位显示，而触屏没有持续 hover ——
+   在 iPhone 上这个按钮很可能压根点不到，而它是这个产品的核心动作之一。
+   另外 20×20 也远小于 iOS 建议的 44pt 最小点击区域。
+   所以在没有 hover 能力的设备上：常驻显示 + 撑大点击热区（视觉大小不变）。 */
+@media (hover: none) {
+  .doc-carry-handle {
+    opacity: 1 !important;
+    position: relative;
+  }
+  /* 视觉还是 20px，但可点范围补到 44px —— 不改版面，只是不再难点。 */
+  .doc-carry-handle::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+  .drag-handle::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* ── iOS 软键盘不会压缩 dvh，它是盖上来的 ──
+   写到长笔记底部时光标会被键盘挡住且不会自动滚动。
+   --kb-inset 由 App 里的 visualViewport 监听写入（键盘收起时为 0）。 */
+.doc-editor {
+  scroll-padding-bottom: var(--kb-inset, 0px);
+}
