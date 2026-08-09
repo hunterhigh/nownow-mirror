@@ -3,7 +3,8 @@
      cp scripts/com.nownow.backup.plist ~/Library/LaunchAgents/
      launchctl load ~/Library/LaunchAgents/com.nownow.backup.plist
      （Mac 那个点没开机会顺延到下次开机后补跑。停用： launchctl unload ...）
-     如果你的仓库不在 /Users/huhaitao/NowNow-tiptap，改下面两个路径。 -->
+     路径必须写成本机仓库的绝对路径。写错不会报错——launchd 只会 exit 127 静默失败，
+     日志还只写到 /tmp，没人看。装完请务必按下面「验证」跑一次。 -->
 <plist version="1.0">
 <dict>
   <key>Label</key>
@@ -11,7 +12,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/Users/huhaitao/NowNow-tiptap/scripts/backup-db.sh</string>
+    <string>/Users/haitao/Desktop/NowNow/scripts/backup-db.sh</string>
   </array>
   <key>StartCalendarInterval</key>
   <dict>
