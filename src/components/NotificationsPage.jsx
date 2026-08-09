@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AtSign, Bell, CheckCircle2, Square, UserPlus, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { loadMyMentions, markMentionRead, dismissMention, completeMention, loadMyCompletions, ackCompletion } from '../lib/docMentionsApi'
+import { loadMyMentions, markMentionRead, dismissMention, completeMention, loadMyCompletions, ackCompletion, dismissAllMentions, ackAllCompletions } from '../lib/docMentionsApi'
 import { periodHeaderFromKey } from '../lib/periodKey'
 
 
@@ -32,7 +32,8 @@ function seedFromStorage(uid) {
 function persistCache(uid) {
   if (!uid) return
   try {
-    localStorage.setItem(lsKey(uid), JSON.stringify({ m: cachedMentions, c: cachedCompletions }))
+    // 封顶 200：这份缓存只为刷新后的首屏，不是完整存档，别让它无限膨胀挤占配额
+    localStorage.setItem(lsKey(uid), JSON.stringify({ m: cachedMentions.slice(0, 200), c: cachedCompletions.slice(0, 200) }))
   } catch { /* 配额满不挡功能：缓存丢了就是下次多白一下 */ }
 }
 
@@ -53,12 +54,17 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
       loadMyCompletions().then((r) => { cachedCompletions = r; cachedUserId = me?.id; persistCache(me?.id); if (alive) setCompletions(r) }).catch(() => {})
     }
     refresh()
-    // 页面开着时也实时刷新 —— 修掉「红点说 3、页面显示 2」的错位（以前只有侧栏红点订阅了 realtime）
+    // 页面开着时也实时刷新 —— 修掉「红点说 3、页面显示 2」的错位（以前只有侧栏红点订阅了 realtime）。
+    // 只订阅**和我有关**的行（我被 @ 的 / 我发出的），并做 400ms 尾随防抖：
+    // 不加过滤的话，全工作区任何人的任何 @ 动静都会让每个开着这页的客户端重拉两次。
+    let debounce = null
+    const scheduled = () => { clearTimeout(debounce); debounce = setTimeout(refresh, 400) }
     const ch = supabase
       .channel('doc_mentions_page')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'doc_mentions' }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'doc_mentions', filter: `mentioned=eq.${me?.id}` }, scheduled)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'doc_mentions', filter: `author=eq.${me?.id}` }, scheduled)
       .subscribe()
-    return () => { alive = false; supabase.removeChannel(ch) }
+    return () => { alive = false; clearTimeout(debounce); supabase.removeChannel(ch) }
   }, [me?.id])
 
   async function approve(p, ok) {
@@ -84,7 +90,6 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
   function removeOptimistic(item, kind, rpc, errMsg) {
     setOperationError('')
     const isMention = kind === 'mention'
-    const prev = isMention ? mentions : completions
     const setList = isMention ? setMentions : setCompletions
     setList((xs) => xs.filter((x) => x.id !== item.id))
     if (isMention) cachedMentions = cachedMentions.filter((x) => x.id !== item.id)
@@ -93,9 +98,11 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
     rpc(item.id)
       .then(() => onChanged?.())
       .catch(() => {
-        setList(prev)
-        if (isMention) cachedMentions = prev
-        else cachedCompletions = prev
+        // 失败回滚只**塞回这一条**，不能整表恢复到点击前的快照 ——
+        // 快照会把并发中已成功删掉的其他条目一起复活（审查抓到的真 bug）。
+        setList((xs) => (xs.some((x) => x.id === item.id) ? xs : [item, ...xs]))
+        if (isMention) cachedMentions = cachedMentions.some((x) => x.id === item.id) ? cachedMentions : [item, ...cachedMentions]
+        else cachedCompletions = cachedCompletions.some((x) => x.id === item.id) ? cachedCompletions : [item, ...cachedCompletions]
         persistCache(me?.id)
         setOperationError(errMsg)
       })
@@ -119,10 +126,9 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
     setClearing(true)
     setOperationError('')
     try {
-      await Promise.all([
-        ...mentions.map((m) => dismissMention(m.id)),
-        ...completions.map((c) => ackCompletion(c.id)),
-      ])
+      // 两个批量 RPC，两次往返、各自原子 —— 之前是每条一个请求，200 条通知
+      // 就是 200 个往返外加 200 次 realtime 广播（migration-034）。
+      await Promise.all([dismissAllMentions(), ackAllCompletions()])
       setMentions([])
       setCompletions([])
       cachedMentions = []

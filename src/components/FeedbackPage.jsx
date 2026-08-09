@@ -74,10 +74,10 @@ export default function FeedbackPage({ me, profiles }) {
 
   function remove(f) {
     setError('')
-    const prev = feedback
     setFeedback((xs) => xs.filter((x) => x.id !== f.id))
     deleteFeedback(f.id).catch(() => {
-      setFeedback(prev)
+      // 只塞回这一条，不整表回滚 —— 快照会复活并发中已成功删掉的其他条目
+      setFeedback((xs) => (xs.some((x) => x.id === f.id) ? xs : [f, ...xs]))
       setError('删除反馈失败，请重试。')
     })
   }

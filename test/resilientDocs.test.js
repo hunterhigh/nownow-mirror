@@ -191,3 +191,68 @@ describe('peekDocCache 的契约：直接能当编辑器初值', () => {
     expect(mod.peekDocCache('u', 'today', '不存在的周期', null)).toBeUndefined()
   })
 })
+
+describe('基准未知时绝不盲写（2026-08-09 终审抓到的静默覆盖漏洞）', () => {
+  it('读失败退回旧缓存后保存：先取服务器当前版本做前置条件，不走无条件 upsert', async () => {
+    const args = { owner: 'u', section: 'today', periodKey: '2026-08-09', tagId: null }
+    // 第一次加载成功（有缓存有版本）
+    loadDocWithMeta.mockResolvedValueOnce({ json: DOC('原文'), updatedAt: 'V1' })
+    await mod.loadDocResilient('u', 'today', '2026-08-09', null)
+    // 模拟"下次加载时服务器挂了"：>30s 的旧缓存路径 → 读失败 → 基准应记为未知
+    // （直接构造：清掉基准 = 从没成功要到版本）
+    mod.forgetDocCacheFor('u', 'today', '2026-08-09', null)
+
+    // 保存：因为基准未知，saveDocResilient 必须**先**问一次服务器当前版本
+    loadDocWithMeta.mockResolvedValueOnce({ json: DOC('别人写的'), updatedAt: 'V9' })
+    saveDoc.mockResolvedValueOnce({ id: 'x', updatedAt: 'V10' })
+    await mod.saveDocResilient({ ...args, json: DOC('我的'), text: '我的' })
+
+    // 关键断言：带的是刚问到的 V9，不是 null（null 会放行无条件 upsert）
+    expect(saveDoc.mock.calls.at(-1)[0].expectedUpdatedAt).toBe('V9')
+  })
+
+  it('基准问不到（网断）：草稿入队等待，绝不落库', async () => {
+    const args = { owner: 'u', section: 'today', periodKey: '2026-08-09', tagId: null }
+    loadDocWithMeta.mockRejectedValue(new Error('network down'))
+    const states = []
+    await mod.saveDocResilient({ ...args, json: DOC('离线稿'), text: '离线稿' }, (x) => states.push(x))
+    expect(saveDoc).not.toHaveBeenCalled()
+    expect(states.at(-1)).toBe('error')
+    // 草稿在本地，不丢
+    expect(JSON.parse(localStorage.getItem('nownow_draft:u/today/2026-08-09')).text).toBe('离线稿')
+  })
+
+  it('部署前的老草稿（payload 没有 baseUpdatedAt 字段）重放时按"未知"处理，不按"可创建"', async () => {
+    // 老代码写的草稿形状：没有 baseUpdatedAt 这个 key
+    localStorage.setItem(
+      'nownow_draft:u/stash/stash',
+      JSON.stringify({ owner: 'u', section: 'stash', periodKey: 'stash', tagId: null, json: DOC('老稿'), text: '老稿' }),
+    )
+    vi.resetModules()
+    mod = await import('../src/lib/resilientDocs.js')
+    loadDocWithMeta.mockResolvedValue({ json: DOC('服务器新内容'), updatedAt: 'V_SERVER' })
+    saveDoc.mockResolvedValue({ id: 'x', updatedAt: 'V_NEXT' })
+    await mod.flushPending()
+    // 必须带着问到的版本写，绝不 expectedUpdatedAt: null 盲写
+    expect(saveDoc.mock.calls.at(-1)[0].expectedUpdatedAt).toBe('V_SERVER')
+  })
+
+  it('启动重放撞冲突：旧稿收进备份并让位，不再永远遮住服务器内容', async () => {
+    // ⚠️ mock 必须配在 import **之前**：模块加载时会立刻跑一次启动重放，
+    // 晚配的话启动那次会拿到"未定义行为=成功"的假结果，把草稿先消费掉。
+    saveDoc.mockRejectedValue(new DocConflictError('V_WEEKEND'))
+    localStorage.setItem(
+      'nownow_draft:u/today/2026-08-08',
+      JSON.stringify({ owner: 'u', section: 'today', periodKey: '2026-08-08', tagId: null, json: DOC('周五稿'), text: '周五稿', baseUpdatedAt: 'V_OLD' }),
+    )
+    vi.resetModules()
+    mod = await import('../src/lib/resilientDocs.js')
+    await mod.flushPending()
+    await new Promise((r) => setTimeout(r, 0)) // 启动那次 flush 是 fire-and-forget，等它落地
+    // 草稿位清空（下次加载走服务器），内容进备份（不丢字）
+    expect(localStorage.getItem('nownow_draft:u/today/2026-08-08')).toBe(null)
+    const backup = JSON.parse(localStorage.getItem('nownow_backup:u/today/2026-08-08'))
+    expect(backup.text).toBe('周五稿')
+    expect(backup.conflictedAt).toBeTruthy()
+  })
+})

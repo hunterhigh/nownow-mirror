@@ -22,7 +22,10 @@ export default function DocSearch({ query, profiles, onJump }) {
   useEffect(() => {
     let alive = true
     const q = (query || '').trim()
-    if (q.length < 2) { setHits([]); return () => { alive = false } }
+    // 长度门槛只拦 ASCII：拉丁字母 1 个字符没有检索意义，但**一个汉字就是一个词**
+    // （"茶"、人名单字都是完整查询）—— 一刀切 <2 会让中文单字搜索永远"无结果"。
+    const isAsciiOnly = /^[\x00-\x7f]*$/.test(q)
+    if (q.length < (isAsciiOnly ? 2 : 1)) { setHits([]); return () => { alive = false } }
     setHits(null)
     const timer = setTimeout(() => {
       searchDocs(q)

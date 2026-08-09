@@ -113,3 +113,15 @@ export async function ackCompletion(id) {
   const { error } = await supabase.rpc('ack_completion', { p_id: id })
   if (error) throw error
 }
+
+/** 一键清空：忽略我的全部 @（一次往返、原子，代替逐条 dismiss_mention）。 */
+export async function dismissAllMentions() {
+  const { error } = await supabase.rpc('dismiss_all_mentions')
+  if (error) throw error
+}
+
+/** 一键清空：点掉我的全部黄色"已完成"知会。 */
+export async function ackAllCompletions() {
+  const { error } = await supabase.rpc('ack_all_completions')
+  if (error) throw error
+}

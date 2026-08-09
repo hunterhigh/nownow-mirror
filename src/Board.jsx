@@ -878,10 +878,13 @@ export default function Board({ session }) {
         <div className="mb-4 flex items-center gap-2.5 px-2.5 py-1.5 text-[17px] font-bold max-md:text-[21px]">
           {/* 头像即入口：点一下换头像。同一张图也是网站的 favicon（见下面的 effect）。 */}
           <span className="relative max-md:hidden">
+            {/* data-avatar-picker：让选择器的"点外面关闭"(mousedown)放过这个按钮 ——
+                否则 mousedown 先把面板关了、click 又把它开回来，点头像永远关不掉面板。 */}
             <button
               onClick={() => setAvatarOpen((v) => !v)}
               title="换个头像"
               aria-label="换个头像"
+              data-avatar-picker=""
               className="block cursor-pointer rounded-md"
             >
               <img src={avatarSrc(me.avatar)} alt="" className="block h-6 w-6 rounded-[4px]" />

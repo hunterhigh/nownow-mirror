@@ -462,18 +462,14 @@
 @media (hover: none) {
   .doc-carry-handle {
     opacity: 1 !important;
+  }
+  /* ::after 定位需要锚点：两种把手都要 relative（漏一个的话热区会锚到最近的定位祖先上）。 */
+  .doc-carry-handle,
+  .drag-handle {
     position: relative;
   }
   /* 视觉还是 20px，但可点范围补到 44px —— 不改版面，只是不再难点。 */
-  .doc-carry-handle::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 44px;
-    height: 44px;
-    transform: translate(-50%, -50%);
-  }
+  .doc-carry-handle::after,
   .drag-handle::after {
     content: '';
     position: absolute;

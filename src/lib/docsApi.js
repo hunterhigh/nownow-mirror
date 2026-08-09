@@ -235,7 +235,7 @@ export async function listPeriods(owner, section, tagId = null) {
 
   const { data, error } = await byTag(query, tagId)
     .order('period_key', { ascending: false })
-    .limit(60)
+    .limit(200)
   if (error) throw error
   return data ?? []
 }

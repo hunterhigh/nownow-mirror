@@ -13,9 +13,21 @@ import { supabase } from './supabase'
 const seen = new Map() // 指纹 -> 上次上报时间
 const DEDUP_MS = 5 * 60_000
 const MAX_LEN = 500
+// 全局限流：不管指纹怎么变，每分钟最多 10 条。防的是"每次报错文案都不一样"的场景
+// （超时毫秒数、请求 id 之类），那会让指纹去重完全失效，一个重试循环每分钟灌几百行。
+const RATE_WINDOW_MS = 60_000
+const RATE_MAX = 10
+let windowStart = 0
+let windowCount = 0
 
 function fingerprint(kind, message) {
-  return `${kind}:${String(message).slice(0, 120)}`
+  // 指纹前先把易变部分归一：数字（时长/端口/毫秒）、UUID、URL 查询串。
+  // "timeout after 3021ms" 和 "timeout after 3187ms" 是同一个问题，不该各占一条。
+  const normalized = String(message)
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<uuid>')
+    .replace(/\?[^\s"']*/g, '')
+    .replace(/\d+/g, '<n>')
+  return `${kind}:${normalized.slice(0, 120)}`
 }
 
 export function report(kind, error, extra = {}) {
@@ -23,10 +35,15 @@ export function report(kind, error, extra = {}) {
     const message = String(error?.message || error || '').slice(0, MAX_LEN)
     if (!message) return
 
-    const fp = fingerprint(kind, message)
     const now = Date.now()
+    if (now - windowStart > RATE_WINDOW_MS) { windowStart = now; windowCount = 0 }
+    if (++windowCount > RATE_MAX) return
+
+    const fp = fingerprint(kind, message)
     if (now - (seen.get(fp) || 0) < DEDUP_MS) return
     seen.set(fp, now)
+    // 顺手清掉过期指纹，别让这张表在长会话里无限长
+    if (seen.size > 200) for (const [k, t] of seen) if (now - t > DEDUP_MS) seen.delete(k)
 
     // 不 await：上报永远不能挡住用户手上的事。
     supabase

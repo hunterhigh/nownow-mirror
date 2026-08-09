@@ -54,7 +54,16 @@ function cacheSet(owner, section, periodKey, tagId = null, json, updatedAt = nul
 }
 
 // 手上这份"基于的版本"。saveDocResilient 用它做保存的前置条件。
-const baseVersion = new Map() // docKey -> updatedAt
+//
+// 三种取值，**语义不同、绝不能混**（混了就是这次审查抓到的静默覆盖漏洞）：
+//   ISO 字符串    已知版本 → 带前置条件写
+//   null          已知服务器**没有**这篇 → 允许创建（upsert）
+//   UNKNOWN_BASE  不知道（离线/读失败时加载的）→ **绝不能直接写**，
+//                 写之前必须先向服务器要一次当前版本；要不到就入队等重试。
+//                 之前这种情况被记成 null，保存就走了无条件 upsert ——
+//                 一台断网机器上的旧稿会把别的设备后写的内容整篇静默抹掉。
+export const UNKNOWN_BASE = '__unknown__'
+const baseVersion = new Map() // docKey -> updatedAt | null | UNKNOWN_BASE
 const rememberBase = (owner, section, periodKey, tagId, updatedAt) => {
   baseVersion.set(docKey(owner, section, periodKey, tagId), updatedAt ?? null)
 }
@@ -153,9 +162,11 @@ export async function warmCache(targets, { concurrency = 4 } = {}) {
     while (i < todo.length) {
       const t = todo[i++]
       try {
-        const server = await _loadDoc(t.owner, t.section, t.periodKey, t.tagId)
+        // 必须用带 meta 的读：预热进缓存的条目要携带 updatedAt，
+        // 否则命中它的加载会把基准记成"没有版本"，随后的保存就绕过了冲突前置条件。
+        const server = await _loadDocWithMeta(t.owner, t.section, t.periodKey, t.tagId)
         // 期间用户可能已编辑/已缓存：再确认一次没东西才写，避免盖掉新缓存
-        if (cacheGet(t.owner, t.section, t.periodKey, t.tagId) === undefined) cacheSet(t.owner, t.section, t.periodKey, t.tagId, server)
+        if (cacheGet(t.owner, t.section, t.periodKey, t.tagId) === undefined) cacheSet(t.owner, t.section, t.periodKey, t.tagId, server.json, server.updatedAt)
       } catch { /* 预取失败无所谓，点开时正常加载兜底 */ }
     }
   }
@@ -242,10 +253,11 @@ export async function loadDocResilient(owner, section, periodKey, tagId = null) 
     rememberBase(owner, section, periodKey, tagId, server.updatedAt)
     return server.json
   } catch (err) {
-    // 服务器拿不到时，宁可显示旧缓存也不要空白页；但 base 记成 null，
-    // 这样之后的保存不会假装自己是基于最新版的。
+    // 服务器拿不到时，宁可显示旧缓存也不要空白页。基准记 UNKNOWN（不是 null！）：
+    // null 的含义是"确认服务器没有这篇、可以创建"，会放行无条件 upsert；
+    // 这里只是"不知道"，保存前必须先问到服务器的当前版本。
     if (cached !== undefined) {
-      rememberBase(owner, section, periodKey, tagId, null)
+      rememberBase(owner, section, periodKey, tagId, UNKNOWN_BASE)
       return cached.json
     }
     throw err
@@ -263,7 +275,9 @@ export async function saveDocResilient({ owner, section, periodKey, tagId = null
       lsSet(bk(owner, section, periodKey, tagId), { ...prev, backedUpAt: new Date().toISOString() })
     }
   }
-  const base = baseVersion.get(docKey(owner, section, periodKey, tagId)) ?? null
+  const bkey = docKey(owner, section, periodKey, tagId)
+  // 从没加载过（或读失败）就保存 → 基准未知，走 UNKNOWN 路径，绝不默认成"可创建"
+  const base = baseVersion.has(bkey) ? baseVersion.get(bkey) : UNKNOWN_BASE
   const payload = { owner, section, periodKey, tagId, json, text, baseUpdatedAt: base }
   const localOk = lsSet(key, payload) // ← 永不丢字：先写本地
   if (!localOk) {
@@ -274,8 +288,22 @@ export async function saveDocResilient({ owner, section, periodKey, tagId = null
   cacheSet(owner, section, periodKey, tagId, json, base) // 读缓存跟着自己的编辑走，绝不被旧缓存遮住
   if (isOffline()) { pending.set(key, payload); onState?.('offline'); return }
   onState?.('saving')
+  // 基准未知：先向服务器要当前版本，要到了才带着前置条件写。
+  // 要不到（网断/服务器挂）就把草稿留在队列里等重试 —— 宁可晚同步，不盲写。
+  let effectiveBase = base
+  if (effectiveBase === UNKNOWN_BASE) {
+    try {
+      const current = await _loadDocWithMeta(owner, section, periodKey, tagId)
+      effectiveBase = current.updatedAt // 字符串=已知版本；null=确认不存在，可创建
+      rememberBase(owner, section, periodKey, tagId, effectiveBase)
+    } catch {
+      pending.set(key, payload)
+      onState?.(isOffline() ? 'offline' : 'error')
+      return
+    }
+  }
   try {
-    const res = await _saveDoc({ ...payload, expectedUpdatedAt: base })
+    const res = await _saveDoc({ ...payload, expectedUpdatedAt: effectiveBase })
     lsDel(key); pending.delete(key)
     // 记住新版本号，下一次编辑就是基于它 —— 否则连续两次保存的第二次会误报冲突。
     rememberBase(owner, section, periodKey, tagId, res?.updatedAt ?? null)
@@ -300,6 +328,9 @@ export async function saveDocResilient({ owner, section, periodKey, tagId = null
         rememberBase(owner, section, periodKey, tagId, current.updatedAt)
         await saveDocResilient({ owner, section, periodKey, tagId, json, text }, onState, true)
       } catch {
+        // 解析基准时网又断了：草稿必须回到重试队列 —— 否则「重试」按钮
+        // （它只重放队列）对这份草稿永远无效，成了一个空按钮。
+        pending.set(key, payload)
         onState?.('error')
       }
       return
@@ -322,14 +353,28 @@ export async function flushPending() {
   if (isOffline() || pending.size === 0) return
   for (const [key, payload] of [...pending]) {
     try {
-      const res = await _saveDoc({ ...payload, expectedUpdatedAt: payload.baseUpdatedAt ?? null })
+      // 基准未知的遗留草稿：先问服务器当前版本，问不到就留到下次，绝不盲写。
+      // ⚠️ 部署前的老草稿 payload 里**没有** baseUpdatedAt 这个字段 —— 那是"未知"，
+      // 不是"确认不存在"（null）。用 in 判断，缺字段一律按未知处理。
+      let base = 'baseUpdatedAt' in payload ? (payload.baseUpdatedAt ?? null) : UNKNOWN_BASE
+      if (base === UNKNOWN_BASE) {
+        try {
+          base = (await _loadDocWithMeta(payload.owner, payload.section, payload.periodKey, payload.tagId)).updatedAt
+        } catch { continue }
+      }
+      const res = await _saveDoc({ ...payload, expectedUpdatedAt: base })
       lsDel(key)
       pending.delete(key)
       rememberBase(payload.owner, payload.section, payload.periodKey, payload.tagId, res?.updatedAt ?? null)
     } catch (err) {
       if (err instanceof DocConflictError) {
-        // 服务器上有更新的内容。草稿保留（不丢字），但退出重试队列，
-        // 免得每次联网都拿旧内容去砸新内容。
+        // 服务器上有更新的内容。旧稿**收进备份、从草稿位挪走**：
+        // 内容不丢（backup 键 + 服务端 doc_revisions 双保险），但绝不再遮住
+        // 服务器上更新的那份 —— 之前只退出队列不清草稿，结果是打开这篇永远
+        // 显示旧稿、看不见别的设备后写的内容，第一次敲键还会把旧稿写回去。
+        lsSet(bk(payload.owner, payload.section, payload.periodKey, payload.tagId), { ...payload, conflictedAt: new Date().toISOString() })
+        lsDel(key)
+        forgetDocCacheFor(payload.owner, payload.section, payload.periodKey, payload.tagId)
         pending.delete(key)
         continue
       }
@@ -339,9 +384,9 @@ export async function flushPending() {
 }
 
 /**
- * 忘掉某篇的读缓存 —— 服务端在本客户端之外被改过时用（例如"搬到今天"）。
+ * 忘掉某篇的读缓存 —— 服务端在本客户端之外被改过时用（例如"搬到今天"、冲突让位）。
  *
- * 不做这一步的话：搬完之后两边都还显示旧缓存（看起来像没生效），
+ * 不做这一步的话：改完之后还显示旧缓存（看起来像没生效），
  * 而用户如果去编辑那个"还在原地"的块，就会把它整篇写回去 —— 结果是块被复制成两份。
  */
 export function forgetDocCacheFor(owner, section, periodKey, tagId = null) {
@@ -349,25 +394,6 @@ export function forgetDocCacheFor(owner, section, periodKey, tagId = null) {
   docCache.delete(key)
   baseVersion.delete(key)
   lsDel(ck(owner, section, periodKey, tagId))
-}
-
-/** 被放弃/被空覆盖前收起来的本地内容（给"找回"用；以前只写不读）。 */
-export function peekLocalBackup(owner, section, periodKey, tagId = null) {
-  return lsGet(bk(owner, section, periodKey, tagId))
-}
-
-/** 还有哪些本地草稿没能落库（上层可以据此提示"有未同步的修改"）。 */
-export function unsyncedDrafts() {
-  const out = []
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i)
-      if (!key || !key.startsWith(LS_PREFIX)) continue
-      const p = lsGet(key)
-      if (p) out.push({ key, owner: p.owner, section: p.section, periodKey: p.periodKey, tagId: p.tagId })
-    }
-  } catch {}
-  return out
 }
 
 // 启动时把上次会话遗留的本地草稿收进重试队列（关标签页/断网遗留也不丢）。

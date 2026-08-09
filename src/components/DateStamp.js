@@ -57,7 +57,7 @@ export const DateStamp = Node.create({
   },
 
   parseHTML() {
-    return [{ tag: 'div[data-date-stamp]' }, { tag: 'span[data-date-stamp]' }]
+    return [{ tag: 'div[data-date-stamp]' }]
   },
 
   renderHTML({ HTMLAttributes, node }) {
@@ -148,6 +148,7 @@ export const DateStamp = Node.create({
           // 高亮闪过一下了（海涛：点击不要有高亮）。
           handleDOMEvents: {
             mousedown: (view, event) => {
+              if (!view.editable) return false // 只读页（看别人的文档）：点击不得改动视图
               const el = event.target instanceof Element ? event.target.closest('[data-date-stamp]') : null
               if (!el) return false
               event.preventDefault()
@@ -158,6 +159,7 @@ export const DateStamp = Node.create({
           },
           // 兜底（触屏等不走 mousedown 的路径）
           handleClickOn: (view, _pos, node, nodePos, _event, direct) => {
+            if (!view.editable) return false
             if (!direct || node.type.name !== name) return false
             jumpBelow(view, nodePos, node)
             return true
