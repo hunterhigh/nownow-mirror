@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Bell, ChevronLeft, ChevronRight, CircleCheck, Menu, PanelLeftClose, PanelLeftOpen, Pin, PinOff, Search, Settings } from 'lucide-react'
+import { Bell, ChevronLeft, ChevronRight, CircleCheck, Menu, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Pin, PinOff, Search, Settings } from 'lucide-react'
 import { loadRecentActivity } from './lib/docsApi'
 import { report } from './lib/report'
 import AvatarPicker, { avatarSrc } from './components/AvatarPicker'
@@ -14,6 +14,7 @@ import { forgetDocCacheForTags, warmCache } from './lib/resilientDocs'
 import { periodKey } from './lib/periodKey'
 import { archiveTag, createTag as createDocTag, loadDocTags, peekDocTags, rememberDocTags, renameTag as renameDocTag, updateTagOrder } from './lib/tagsApi'
 import NotificationsPage from './components/NotificationsPage'
+import FeedbackPage from './components/FeedbackPage'
 import DocTimeline from './components/DocTimeline'
 import DocSearch from './components/DocSearch'
 import DocTagBar from './components/DocTagBar'
@@ -909,6 +910,9 @@ export default function Board({ session }) {
           </button>
           {/* 手机：通知/设置收进右侧（flomo 式抽屉头），点击进对应整页 */}
           <span className="-mr-2.5 ml-auto flex items-center gap-0.5 md:hidden">
+            <button onClick={() => setView('feedback')} className="p-1.5 text-stone-500" title="反馈" aria-label="反馈">
+              <MessageSquarePlus size={22} />
+            </button>
             <button onClick={() => setView('notifications')} className="relative p-1.5 text-stone-500" title="通知" aria-label="通知">
               <Bell size={22} />
               {notifCount > 0 && (
@@ -977,8 +981,17 @@ export default function Board({ session }) {
             </SortableContext>
           </DndContext>
         </div>
-        {/* 底部：通知（完整页面）+ 设置（桌面；手机入口在抽屉头名字右侧） */}
+        {/* 底部：反馈 + 通知（完整页面）+ 设置（桌面；手机入口在抽屉头名字右侧） */}
         <div className="mt-auto max-md:hidden">
+          <button
+            onClick={() => setView(view === 'feedback' ? 'paper' : 'feedback')}
+            className={
+              'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[14px] hover:bg-[var(--nav-soft)] ' +
+              (view === 'feedback' ? 'bg-[var(--nav-soft)] font-medium text-stone-900' : 'text-stone-500')
+            }
+          >
+            <MessageSquarePlus size={16} /> 反馈
+          </button>
           <button
             onClick={() => setView(view === 'notifications' ? 'paper' : 'notifications')}
             className={
@@ -1180,6 +1193,8 @@ export default function Board({ session }) {
                 profiles={profiles}
                 onProfileSaved={loadProfiles}
               />
+            ) : view === 'feedback' ? (
+              <FeedbackPage me={me} profiles={profiles} />
             ) : view === 'notifications' ? (
               <NotificationsPage
                 me={me}
