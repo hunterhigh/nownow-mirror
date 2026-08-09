@@ -5,7 +5,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view'
 // 逐行私密：给块级节点加一个布尔 `private` 属性，渲染成 data-private="true"（CSS 给自己侧底色）。
 // 真隐私由数据侧兜底（老铁）：存的时候按 attrs.private 递归剥离生成 doc_json_public，
 // 别人读到的版本里这些块根本不存在（含其中的 @通知、搜索文字）。前端只负责打标记 + 自己侧提示。
-const PRIVATE_TYPES = ['paragraph', 'heading', 'taskItem', 'listItem', 'blockquote', 'codeBlock', 'image']
+const PRIVATE_TYPES = ['paragraph', 'heading', 'taskItem', 'listItem', 'blockquote', 'codeBlock', 'image','table','callout','horizontalRule']
 
 // PrivateBlock：只加属性（DocEditor + markdown 转换器共用，转换器不需要下面的 UI 插件）。
 export const PrivateBlock = Extension.create({

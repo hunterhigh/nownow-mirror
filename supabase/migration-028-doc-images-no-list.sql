@@ -1,0 +1,42 @@
+-- 028：收回 doc-images 的"列举"权限（现有图片链接完全不受影响）
+--
+-- 背景：012 建桶时的判断是「团队工具、无隐私(P2)，公开读最简单」——在当时是对的。
+-- 但 020 上线了块级隐私之后，这个前提变了，而桶的策略没有跟着复查：
+-- 放进「私密块」的图片，文件本身仍然躺在公开桶里（标记私密只是把节点从
+-- doc_json_public 里剥掉，不会动已经上传的文件）。
+--
+-- 实测（2026-08-09，仅用前端 bundle 里那个公开 anon key）：
+--   POST /storage/v1/object/list/doc-images  → 列出全部用户目录
+--   GET  /storage/v1/object/public/...       → 206，完全不需要任何凭证
+-- 也就是说：任何人抄走公开 key，就能枚举并下载所有人上传过的全部图片。
+--
+-- 这一版只解决「枚举」，不动「读取」：
+-- 路径是 {uid}/{时间戳}-{随机}.{ext}，拿不到清单就等于猜不到。
+--
+-- 为什么删掉读策略不会让图片挂掉：
+-- 012 自己的注释就写了「bucket public 已可匿名读，显式 select 兜底」——
+-- 公开桶的 /object/public/ 下载根本不走 RLS，这条策略对显示图片是多余的；
+-- 它唯一实际生效的地方，恰恰是 /object/list/ 这个枚举接口。
+-- 前端也从不列举（src/lib/storage.js 只有 upload + getPublicUrl，后者是纯字符串拼接）。
+--
+-- 因此：现有文档里的每一张 ![](...) 照常显示，用户完全无感。
+--
+-- 彻底修法（桶转 private + 渲染时换签名 URL）留到 029，那个需要配套改前端，
+-- 而且同样不必改写 doc_json 里已存的 URL。
+
+drop policy if exists doc_images_read on storage.objects;
+
+-- 上传/改/删的策略（012 里定义的三条）保持不变，它们都是 to authenticated 且限本人目录。
+
+-- 验证（跑完这段之后）：
+--   1) 列举应当失败或返回空：
+--      curl -X POST 'https://<ref>.supabase.co/storage/v1/object/list/doc-images' \
+--        -H "apikey: $ANON" -H "Authorization: Bearer $ANON" \
+--        -H 'Content-Type: application/json' -d '{"prefix":"","limit":5}'
+--   2) 已知路径的图片仍应当能读到（这条必须还是 200/206）：
+--      curl -I 'https://<ref>.supabase.co/storage/v1/object/public/doc-images/<uid>/<file>'
+--   3) 打开线上站点，翻几篇有图的旧文档，确认图片正常显示。
+--
+-- 回滚（如果第 2 步失败）：
+--   create policy doc_images_read on storage.objects for select to public
+--     using (bucket_id = 'doc-images');
