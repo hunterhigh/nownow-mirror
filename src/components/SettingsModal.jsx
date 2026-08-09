@@ -162,7 +162,7 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
 
         {/* 个人信息 */}
         <div className="mt-4">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-stone-300 max-md:text-[12.5px]">个人信息</div>
+          <div className="text-[11px] font-medium uppercase tracking-wide text-stone-500 max-md:text-[12.5px]">个人信息</div>
           <label className="mt-2 block text-xs text-stone-500 max-md:text-[13px]">
             名字（显示用它，@你 也用它；改完自动保存）
             <span className="relative block">
@@ -211,7 +211,7 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
 
         {/* 成员 */}
         <div className="mt-5 border-t border-stone-100 pt-4">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-stone-300 max-md:text-[12.5px]">成员</div>
+          <div className="text-[11px] font-medium uppercase tracking-wide text-stone-500 max-md:text-[12.5px]">成员</div>
           <button
             onClick={copyFixedInvite}
             className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md bg-[var(--btn-bg)] px-3 py-2 text-[13px] text-[var(--btn-fg)] hover:bg-[var(--btn-bg-hover)] max-md:text-[14.5px]"
@@ -224,7 +224,7 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
               {inviteLink}
             </div>
           )}
-          <p className="mt-1 text-[11px] text-stone-300 max-md:text-[12.5px]">
+          <p className="mt-1 text-[11px] text-stone-500 max-md:text-[12.5px]">
             把这个链接发给谁，对方打开就能用邀请码注册进来，无需审批。
           </p>
           {(() => {
@@ -282,7 +282,7 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
 
         {/* 数据与账号 */}
         <div className="mt-5 border-t border-stone-100 pt-4">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-stone-300 max-md:text-[12.5px]">数据与账号</div>
+          <div className="text-[11px] font-medium uppercase tracking-wide text-stone-500 max-md:text-[12.5px]">数据与账号</div>
           <button onClick={exportData} disabled={exporting} className="mt-2 flex items-center gap-1.5 text-[13px] text-stone-500 hover:text-stone-700 disabled:opacity-50 max-md:text-[15px]">
             <Download size={13} /> {exporting ? '导出中…' : '导出我的数据（Markdown）'}
           </button>
