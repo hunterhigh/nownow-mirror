@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { supabase } from './lib/supabase'
+import { avatarSrc } from './components/AvatarPicker'
 
 // 两态：注册（要邀请码）/ 登录（不要码）。新用户落注册页、回头客落登录页；带邀请链接一律注册页。
 // 起名字在进门后的 SetupCard 完成；这里只管「拿到登录态」。
@@ -133,7 +134,10 @@ export default function Login() {
   return (
     <div className="login-paper relative flex min-h-dvh flex-col items-center justify-center px-4 max-md:justify-start max-md:pt-[12vh]">
       <div className="float-in w-full max-w-sm rounded-lg border border-stone-200/80 bg-[var(--surface-elevated)] px-8 py-10 text-center shadow-[0_8px_40px_rgba(0,0,0,0.06)]">
-        <img src="/logo.png" alt="NowNow" className="mx-auto w-20" />
+        {/* 登录/注册页还没有"我"，所以直接用默认头像 —— 不写死 a3，
+            这样以后改 DEFAULT_AVATAR 一处，进门前后看到的是同一张。
+            圆角 13px 仍是边长的 1/6（80px），和侧栏 24/4、入口页 56/9 同一比例。 */}
+        <img src={avatarSrc(null)} alt="NowNow" className="mx-auto w-20 rounded-[13px]" />
         {!recover && authMode === 'register' ? (
           <h1 className="mt-5 flex items-baseline justify-center text-xl font-bold">
             Hi&nbsp;@

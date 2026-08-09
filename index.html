@@ -2,7 +2,9 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/logo.png" />
+    <!-- 指向头像本体而不是单独做一张 favicon：登录后 Board 会把这个节点的 href
+         换成用户选的头像，用同一个文件就只下载一次、共用一份缓存。 -->
+    <link rel="icon" type="image/png" href="/avatars/a3.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <!-- maximum-scale=1：禁止 iOS 点输入框时整页自动放大（捏合缩放不受影响） -->
