@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AtSign, Bell, Check, CheckCircle2, UserPlus, X } from 'lucide-react'
+import { AtSign, Bell, CheckCircle2, Square, UserPlus, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { loadMyMentions, markMentionRead, dismissMention, completeMention, loadMyCompletions, ackCompletion } from '../lib/docMentionsApi'
 import { periodHeaderFromKey } from '../lib/periodKey'
@@ -54,47 +54,34 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
     onJumpDoc?.(m.owner, m.section, m.periodKey, m.tagId)
   }
 
+  // 三个动作都是**乐观更新**：先让条目当场消失，网络请求在后面追。
+  // 之前是等服务器返回才删 —— 国内走 /sb 代理一个往返几百毫秒，
+  // 点完像没反应（海涛："得等一会内容才会消失"）。失败的话把条目放回来并提示，
+  // 最坏情况是"闪了一下又回来了"，不会丢。
+  function removeOptimistic(item, kind, rpc, errMsg) {
+    setOperationError('')
+    const isMention = kind === 'mention'
+    const prev = isMention ? mentions : completions
+    const setList = isMention ? setMentions : setCompletions
+    setList((xs) => xs.filter((x) => x.id !== item.id))
+    if (isMention) cachedMentions = cachedMentions.filter((x) => x.id !== item.id)
+    else cachedCompletions = cachedCompletions.filter((x) => x.id !== item.id)
+    rpc(item.id)
+      .then(() => onChanged?.())
+      .catch(() => {
+        setList(prev)
+        if (isMention) cachedMentions = prev
+        else cachedCompletions = prev
+        setOperationError(errMsg)
+      })
+  }
+
   // ✕ 一条：忽略。对方什么也收不到。
-  async function dismiss(m) {
-    setOperationError('')
-    try {
-      await dismissMention(m.id)
-      setMentions((xs) => xs.filter((x) => x.id !== m.id))
-      cachedMentions = cachedMentions.filter((x) => x.id !== m.id)
-    } catch {
-      setOperationError('删除通知失败，请重试。')
-      return
-    }
-    onChanged?.()
-  }
-
-  // ✓ 一条：处理好了。和 ✕ 一样从列表消失，唯一区别是对方会收到一条黄色知会。
-  async function complete(m) {
-    setOperationError('')
-    try {
-      await completeMention(m.id)
-      setMentions((xs) => xs.filter((x) => x.id !== m.id))
-      cachedMentions = cachedMentions.filter((x) => x.id !== m.id)
-    } catch {
-      setOperationError('操作失败，请重试。')
-      return
-    }
-    onChanged?.()
-  }
-
+  const dismiss = (m) => removeOptimistic(m, 'mention', dismissMention, '删除通知失败，请重试。')
+  // ☐ 完成：和 ✕ 一样从列表消失，唯一区别是对方会收到一条黄色知会。
+  const complete = (m) => removeOptimistic(m, 'mention', completeMention, '操作失败，请重试。')
   // 点掉一条黄色知会
-  async function ackDone(c) {
-    setOperationError('')
-    try {
-      await ackCompletion(c.id)
-      setCompletions((xs) => xs.filter((x) => x.id !== c.id))
-      cachedCompletions = cachedCompletions.filter((x) => x.id !== c.id)
-    } catch {
-      setOperationError('关闭通知失败，请重试。')
-      return
-    }
-    onChanged?.()
-  }
+  const ackDone = (c) => removeOptimistic(c, 'completion', ackCompletion, '关闭通知失败，请重试。')
 
   // 一键清空 = 忽略所有 @ + 点掉所有黄色知会。
   // 不需要确认：Clear 走的是 ✕ 的语义（忽略，不发任何知会），清通知就像清邮箱。
@@ -177,7 +164,7 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
       {mentions.length > 0 && (
         <div className="mt-5 rounded-lg px-4 py-3" style={{ background: 'var(--accent-soft)' }}>
           <div className="mb-1.5 flex items-center gap-1 text-xs font-bold max-md:text-[13px]" style={{ color: 'var(--accent)' }}>
-            <AtSign size={13} /> 我的 · {mentions.length}
+            <AtSign size={15} /> 我的 · {mentions.length}
           </div>
           {mentions.map((m) => {
             const from = profiles?.find((p) => p.id === m.author)
@@ -186,6 +173,16 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
             const who = from?.display_name || '有人'
             return (
               <div key={m.id} className="flex items-start gap-2 py-1 text-[13.5px] max-md:py-1.5 max-md:text-[15.5px]">
+                {/* 待办式方框：点一下 = 完成，条目消失、对方收到黄色知会。
+                    没有"勾上停留"的状态 —— 点即走，和 ✕ 一样，只是多发一条通知。 */}
+                <button
+                  onClick={() => complete(m)}
+                  title="完成（对方会收到通知）"
+                  aria-label="完成（对方会收到通知）"
+                  className="mt-0.5 shrink-0 text-stone-400 transition-colors hover:text-[var(--accent)]"
+                >
+                  <Square size={16} />
+                </button>
                 <button
                   onClick={() => openMention(m)}
                   className="block min-w-0 flex-1 text-left hover:opacity-80"
@@ -193,21 +190,16 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
                   {m.snippet ? (
                     <>
                       <div className="truncate" style={{ color: dim ? 'var(--ink-muted)' : 'var(--ink)' }}>{m.snippet}</div>
-                      <div className="mt-0.5 flex items-center gap-2 text-[11.5px]" style={{ color: 'var(--ink-faint)' }}>
-                        <span className="min-w-0 flex-1 truncate"><b style={{ color: 'var(--ink-muted)' }}>{who}</b> @了你 · {ctx}</span>
-                        <span className="shrink-0" style={{ color: dim ? 'var(--ink-faint)' : 'var(--accent)' }}>去看看</span>
+                      <div className="mt-0.5 truncate text-[11.5px]" style={{ color: 'var(--ink-faint)' }}>
+                        <b style={{ color: 'var(--ink-muted)' }}>{who}</b> @了你 · {ctx}
                       </div>
                     </>
                   ) : (
                     <div className="flex items-center gap-2" style={{ color: dim ? 'var(--ink-faint)' : 'var(--ink-muted)' }}>
                       <span className="min-w-0 flex-1 truncate"><b style={{ color: dim ? 'var(--ink-faint)' : 'var(--ink)' }}>{who}</b> 在「{SECTION_LABELS[m.section]}」@了你</span>
-                      <span className="shrink-0 text-[11.5px]" style={{ color: dim ? 'var(--ink-faint)' : 'var(--accent)' }}>{ctx} · 去看看</span>
+                      <span className="shrink-0 text-[11.5px]" style={{ color: 'var(--ink-faint)' }}>{ctx}</span>
                     </div>
                   )}
-                </button>
-                {/* ✓ 和 ✕ 都让条目消失；唯一区别是 ✓ 给对方发一条黄色知会。没有"勾选态"。 */}
-                <button onClick={() => complete(m)} title="处理好了，知会 TA 一声" aria-label="处理好了，知会 TA 一声" className="mt-0.5 shrink-0 text-stone-400 hover:text-[var(--accent)]">
-                  <Check size={15} />
                 </button>
                 <button onClick={() => dismiss(m)} title="忽略（TA 不会收到任何提示）" aria-label="忽略这条通知" className="mt-0.5 shrink-0 text-stone-400 hover:text-stone-600">
                   <X size={14} />
@@ -222,14 +214,13 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
       {completions.length > 0 && (
         <div className="mt-3 rounded-lg px-4 py-3" style={{ background: 'color-mix(in srgb, var(--warning) 16%, var(--surface-elevated))' }}>
           <div className="mb-1.5 flex items-center gap-1 text-xs font-bold max-md:text-[13px]" style={{ color: 'var(--warning)' }}>
-            <CheckCircle2 size={13} /> 处理好了 · {completions.length}
+            <CheckCircle2 size={15} /> 已完成 · {completions.length}
           </div>
           {completions.map((c) => {
             const who = profiles?.find((p) => p.id === c.mentioned)?.display_name || '有人'
             const ctx = c.section === 'stash' ? '收集箱' : periodHeaderFromKey(c.section, c.periodKey)
             return (
               <div key={c.id} className="flex items-start gap-2 py-1 text-[13.5px] max-md:py-1.5 max-md:text-[15.5px]">
-                <CheckCircle2 size={16} className="mt-0.5 shrink-0" style={{ color: 'var(--warning)' }} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate" style={{ color: 'var(--ink)' }}>{c.snippet || '（无内容）'}</div>
                   <div className="mt-0.5 truncate text-[11.5px]" style={{ color: 'var(--ink-faint)' }}>

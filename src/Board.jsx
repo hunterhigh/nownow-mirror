@@ -13,7 +13,6 @@ import { loadMyMentions, loadMyCompletions, loadMentionFrequency } from './lib/d
 import { forgetDocCacheForTags, warmCache } from './lib/resilientDocs'
 import { periodKey } from './lib/periodKey'
 import { archiveTag, createTag as createDocTag, loadDocTags, peekDocTags, rememberDocTags, renameTag as renameDocTag, updateTagOrder } from './lib/tagsApi'
-import Inbox from './components/Inbox'
 import NotificationsPage from './components/NotificationsPage'
 import DocTimeline from './components/DocTimeline'
 import DocSearch from './components/DocSearch'
@@ -783,8 +782,8 @@ export default function Board({ session }) {
     [profiles, myInviteTokens],
   )
 
-  // 「待我处理 / 我派出去的」侧栏入口已按 Haitao 移除；mentions/notifications 底层数据保留，要恢复见 git 3e4455d
-  const inboxCount = mentions.length // 还用在手机 ☰ 红点（@我窄条仍在「我的目标」里）
+  // 首页的 @ 窄条已按 Haitao 移除（2026-08-09），组件收进 archive/Inbox.jsx；
+  // 通知的唯一入口是铃铛。旧 entries/mentions 那套的 inboxCount 恒为 0，一并清掉。
   // 红点数「还没让你知道的」：未读的 @ + 未点掉的黄色知会 + 待确认成员。
   // 读过没忽略的 @ 还留在通知页里，但不再吊着红数字 —— 通知的职责是让你知道，
   // 你知道了它就完成了使命。
@@ -1078,7 +1077,7 @@ export default function Board({ session }) {
             <>
               <button onClick={() => setDrawerOpen(true)} className="relative p-1.5 text-stone-600" title="菜单" aria-label="菜单">
                 <Menu size={20} />
-                {inboxCount + notifCount > 0 && <span className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-red-500" />}
+                {notifCount > 0 && <span className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-red-500" />}
               </button>
               <button
                 onClick={() => viewPage(me.id)}
@@ -1169,14 +1168,6 @@ export default function Board({ session }) {
         </div>
         {/* -ml-6 pl-6：把左侧 24px（拖把手的悬浮区）包进容器内，配合 overflow-x-hidden 不被裁掉 */}
         <div ref={scrollRef} className="paper-scroll -ml-6 flex-1 overflow-y-auto overflow-x-hidden pb-2 pl-6 pr-3">
-          {isMyPage && view === 'paper' && (
-            <Inbox
-              me={me}
-              profiles={profiles}
-              onJumpDoc={jumpToDoc}
-              scope={{ section: channel, periodKey: periodKey(channel, 0, baseDate) }}
-            />
-          )}
           {/* 所有视图统一收进 720px 主列（--doc-width）：通知/设置/正文同一阅读宽，
              左对齐和上方 tab/日期头同边界，折叠侧栏时跟着撑到左边 */}
           <div className="w-full max-w-[var(--doc-width)]">
