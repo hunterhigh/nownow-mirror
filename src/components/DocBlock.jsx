@@ -64,8 +64,11 @@ export default function DocBlock({ owner, section, periodKey, tagId = null, edit
   return (
     <div className="relative">
       {editable && (
-        <div className="absolute right-1 top-1 z-10">
-          <SaveStatus state={saveState} onRetry={() => { flushPending(); onSaveState('saving') }} />
+        <div className="absolute right-1 top-1 z-10 flex items-center gap-2">
+          <SaveStatus
+            state={saveState}
+            onRetry={() => { flushPending(); onSaveState('saving') }}
+          />
         </div>
       )}
       <DocEditor

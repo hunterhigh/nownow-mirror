@@ -2,8 +2,9 @@
 // 核心保证：用户打的字先落 localStorage（秒级、不等网），再尝试落库；断网/失败入队、联网自动重试。
 // 刷新/崩溃/断网都不丢——本地草稿在，下次加载优先用它。
 // 对外状态机：'saving' | 'saved' | 'offline' | 'error'，给 UI 低干扰指示用（视觉由 @UI 规范）。
-import { loadDoc as _loadDoc, saveDoc as _saveDoc } from './docsApi'
+import { DocConflictError, loadDoc as _loadDoc, loadDocWithMeta as _loadDocWithMeta, saveDoc as _saveDoc } from './docsApi'
 import { supabase } from './supabase'
+import { report } from './report'
 
 const LS_PREFIX = 'nownow_draft:' // 未确认落库的本地草稿
 const LS_BACKUP_PREFIX = 'nownow_backup:' // 空覆盖前留的旧内容（客户端兜底，配合服务端 doc_revisions）
@@ -14,7 +15,12 @@ const bk = (owner, section, periodKey, tagId = null) => `${LS_BACKUP_PREFIX}${do
 
 const pending = new Map() // key -> 最新 payload（断网/失败待重试）
 
-function lsSet(key, v) { try { localStorage.setItem(key, JSON.stringify(v)) } catch {} }
+// 返回是否真的写进去了。以前这里 catch 掉一切并且不吭声 ——
+// 于是配额满的时候，"先落本地、永不丢字"这句话就成了空话：
+// 本地没写成、网络又失败，草稿只在内存里，刷新即消失，而用户被告知"已保存"。
+function lsSet(key, v) {
+  try { localStorage.setItem(key, JSON.stringify(v)); return true } catch { return false }
+}
 function lsGet(key) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null } catch { return null } }
 function lsDel(key) { try { localStorage.removeItem(key) } catch {} }
 
@@ -26,18 +32,79 @@ const LS_CACHE_PREFIX = 'nownow_doccache:'
 const ck = (owner, section, periodKey, tagId = null) => `${LS_CACHE_PREFIX}${docKey(owner, section, periodKey, tagId)}`
 const docCache = new Map() // docKey(owner, section, periodKey, tagId) -> json（内存层，最快）
 
+// 缓存里除了内容，还要记住"这份是库里的哪一版(updatedAt)"和"什么时候取的(at)"。
+// 少了这两样，就没法判断手上这份是不是已经过期 —— 而拿过期的整篇去存，
+// 会把别的设备刚写的内容整段抹掉（且界面上毫无提示）。
 function cacheGet(owner, section, periodKey, tagId = null) {
   const mem = docKey(owner, section, periodKey, tagId)
   if (docCache.has(mem)) return docCache.get(mem)
   const ls = lsGet(ck(owner, section, periodKey, tagId)) // 跨刷新：从 localStorage 回填内存
-  if (ls && ls.json !== undefined) { docCache.set(mem, ls.json ?? null); return ls.json ?? null }
+  if (ls && ls.json !== undefined) {
+    const entry = { json: ls.json ?? null, updatedAt: ls.updatedAt ?? null, at: ls.at ?? 0 }
+    docCache.set(mem, entry)
+    return entry
+  }
   return undefined // 未命中（undefined 区别于 null=空文档）
 }
-function cacheSet(owner, section, periodKey, tagId = null, json) {
-  docCache.set(docKey(owner, section, periodKey, tagId), json ?? null)
-  lsSet(ck(owner, section, periodKey, tagId), { json: json ?? null, at: Date.now() })
+function cacheSet(owner, section, periodKey, tagId = null, json, updatedAt = null) {
+  const entry = { json: json ?? null, updatedAt: updatedAt ?? null, at: Date.now() }
+  docCache.set(docKey(owner, section, periodKey, tagId), entry)
+  lsSet(ck(owner, section, periodKey, tagId), entry)
   pruneDocCache()
 }
+
+// 手上这份"基于的版本"。saveDocResilient 用它做保存的前置条件。
+const baseVersion = new Map() // docKey -> updatedAt
+const rememberBase = (owner, section, periodKey, tagId, updatedAt) => {
+  baseVersion.set(docKey(owner, section, periodKey, tagId), updatedAt ?? null)
+}
+
+// 缓存超过这个时长就不再直接拿来用，先等服务器 —— 否则一个开了一夜的标签页
+// 会拿昨天的内容当"当前版本"，用户随手敲一个字就整篇盖回去。
+const CACHE_MAX_AGE_MS = 30_000
+/**
+ * 清理那些从来没人清过的键族。
+ *
+ * 只有 doccache 有上限；backup / periodcache / tagcache 全是只增不减，
+ * 而 backup 每次"空覆盖"或"放弃我这份"都会写进一整篇文档。堆到配额上限，
+ * 倒霉的是草稿写入 —— 也就是防丢字的最后一道防线。
+ */
+export function pruneAll() {
+  pruneDocCache()
+  pruneByAge(LS_BACKUP_PREFIX, 30 * 24 * 60 * 60_000) // 备份留 30 天
+  pruneByCount('nownow_periodcache:', 40)
+  pruneByCount('nownow_tagcache:', 40)
+}
+
+function pruneByAge(prefix, maxAgeMs) {
+  try {
+    const now = Date.now()
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i)
+      if (!key || !key.startsWith(prefix)) continue
+      const v = lsGet(key)
+      const at = v?.backedUpAt || v?.discardedAt || v?.at
+      const ts = typeof at === 'string' ? Date.parse(at) : at
+      if (ts && now - ts > maxAgeMs) localStorage.removeItem(key)
+    }
+  } catch {}
+}
+
+function pruneByCount(prefix, max) {
+  try {
+    const keys = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && key.startsWith(prefix)) keys.push(key)
+    }
+    if (keys.length <= max) return
+    keys.map((key) => ({ key, at: lsGet(key)?.at || 0 }))
+      .sort((a, b) => b.at - a.at)
+      .slice(max)
+      .forEach(({ key }) => lsDel(key))
+  } catch {}
+}
+
 // 限制 localStorage 里缓存的文档数（按最近访问，留最近 40 篇），防膨胀。
 function pruneDocCache(max = 40) {
   try {
@@ -99,7 +166,12 @@ export async function warmCache(targets, { concurrency = 4 } = {}) {
 // 不经过 content=undefined 的占位空白，消除「即使缓存命中也闪一下加载」的 1 帧空白。
 // 返回：undefined=未命中（按原流程异步加载）、null=空文档、obj=PM JSON。
 export function peekDocCache(owner, section, periodKey, tagId = null) {
-  return cacheGet(owner, section, periodKey, tagId)
+  // 只回内容本身。cacheGet 现在返回 { json, updatedAt, at }（为了做版本前置条件），
+  // 但这个函数的契约一直是"直接可以当编辑器初值用的 PM JSON"——
+  // 一度把整个包装对象透传出去，编辑器拿到的就不是文档了，表现为**内容凭空消失**。
+  // undefined = 未命中（要显示加载占位），null = 空文档，两者不能混。
+  const entry = cacheGet(owner, section, periodKey, tagId)
+  return entry === undefined ? undefined : entry.json ?? null
 }
 
 export function forgetDocCacheForTags(owner, section, tagIds = [null]) {
@@ -133,28 +205,57 @@ export function forgetDocCacheForTags(owner, section, tagIds = [null]) {
 export async function loadDocResilient(owner, section, periodKey, tagId = null) {
   const local = lsGet(k(owner, section, periodKey, tagId))
   if (local && local.json !== undefined) {
-    if (!isEffectivelyEmpty(local.json, local.text)) return local.json ?? null
+    if (!isEffectivelyEmpty(local.json, local.text)) {
+      // 草稿是"还没落库的我自己的修改"，它基于的版本记在草稿里。
+      rememberBase(owner, section, periodKey, tagId, local.baseUpdatedAt ?? null)
+      return local.json ?? null
+    }
     try {
-      const server = await _loadDoc(owner, section, periodKey, tagId)
-      if (!isEffectivelyEmpty(server, null)) { lsDel(k(owner, section, periodKey, tagId)); cacheSet(owner, section, periodKey, tagId, server); return server }
+      const server = await _loadDocWithMeta(owner, section, periodKey, tagId)
+      if (!isEffectivelyEmpty(server.json, null)) {
+        lsDel(k(owner, section, periodKey, tagId))
+        cacheSet(owner, section, periodKey, tagId, server.json, server.updatedAt)
+        rememberBase(owner, section, periodKey, tagId, server.updatedAt)
+        return server.json
+      }
     } catch { /* 服务器读不到：退回本地，保持"永不丢字"语义 */ }
+    rememberBase(owner, section, periodKey, tagId, local.baseUpdatedAt ?? null)
     return local.json ?? null
   }
-  // 无草稿 → 缓存优先：命中就秒返 + 后台刷新缓存（跳转/翻页即时）；未命中拉服务器并缓存。
+  // 无草稿 → 缓存优先，但只在"足够新"时才直接用。
+  // 旧缓存照样先渲染（秒显），只是不把它当成可以据以覆盖的版本 —— 保存时
+  // 前置条件会不匹配，从而走冲突路径而不是静默抹掉别人写的东西。
   const cached = cacheGet(owner, section, periodKey, tagId)
-  if (cached !== undefined) {
-    _loadDoc(owner, section, periodKey, tagId).then((fresh) => cacheSet(owner, section, periodKey, tagId, fresh)).catch(() => {})
-    return cached
+  if (cached !== undefined && Date.now() - (cached.at || 0) < CACHE_MAX_AGE_MS) {
+    rememberBase(owner, section, periodKey, tagId, cached.updatedAt)
+    _loadDocWithMeta(owner, section, periodKey, tagId)
+      .then((fresh) => {
+        cacheSet(owner, section, periodKey, tagId, fresh.json, fresh.updatedAt)
+        rememberBase(owner, section, periodKey, tagId, fresh.updatedAt)
+      })
+      .catch(() => {})
+    return cached.json
   }
-  const server = await _loadDoc(owner, section, periodKey, tagId)
-  cacheSet(owner, section, periodKey, tagId, server)
-  return server
+  try {
+    const server = await _loadDocWithMeta(owner, section, periodKey, tagId)
+    cacheSet(owner, section, periodKey, tagId, server.json, server.updatedAt)
+    rememberBase(owner, section, periodKey, tagId, server.updatedAt)
+    return server.json
+  } catch (err) {
+    // 服务器拿不到时，宁可显示旧缓存也不要空白页；但 base 记成 null，
+    // 这样之后的保存不会假装自己是基于最新版的。
+    if (cached !== undefined) {
+      rememberBase(owner, section, periodKey, tagId, null)
+      return cached.json
+    }
+    throw err
+  }
 }
 
 // 存：先落本地（永不丢），再尝试落库；失败/断网入队等重试。onState 给 UI 显示。
 // 守卫(P0-2)：把"空"存进来、而上一份非空时，先把旧的备份到 backup key——客户端兜底；
 // 服务端还有 doc_revisions 触发器在覆盖前快照旧版，双保险，空存也丢不掉。
-export async function saveDocResilient({ owner, section, periodKey, tagId = null, json, text }, onState) {
+export async function saveDocResilient({ owner, section, periodKey, tagId = null, json, text }, onState, _afterConflict = false) {
   const key = k(owner, section, periodKey, tagId)
   if (isEffectivelyEmpty(json, text)) {
     const prev = lsGet(key)
@@ -162,27 +263,111 @@ export async function saveDocResilient({ owner, section, periodKey, tagId = null
       lsSet(bk(owner, section, periodKey, tagId), { ...prev, backedUpAt: new Date().toISOString() })
     }
   }
-  const payload = { owner, section, periodKey, tagId, json, text }
-  lsSet(key, payload) // ← 永不丢字：先写本地
-  cacheSet(owner, section, periodKey, tagId, json) // 读缓存跟着自己的编辑走，绝不被旧缓存遮住
+  const base = baseVersion.get(docKey(owner, section, periodKey, tagId)) ?? null
+  const payload = { owner, section, periodKey, tagId, json, text, baseUpdatedAt: base }
+  const localOk = lsSet(key, payload) // ← 永不丢字：先写本地
+  if (!localOk) {
+    // 本地这层已经失守。配额满通常是缓存/备份堆积造成的，先清一轮再试一次。
+    pruneAll()
+    if (!lsSet(key, payload)) onState?.('error') // 说出来：此刻"不丢字"这个承诺是不成立的
+  }
+  cacheSet(owner, section, periodKey, tagId, json, base) // 读缓存跟着自己的编辑走，绝不被旧缓存遮住
   if (isOffline()) { pending.set(key, payload); onState?.('offline'); return }
   onState?.('saving')
   try {
-    await _saveDoc(payload)
+    const res = await _saveDoc({ ...payload, expectedUpdatedAt: base })
     lsDel(key); pending.delete(key)
+    // 记住新版本号，下一次编辑就是基于它 —— 否则连续两次保存的第二次会误报冲突。
+    rememberBase(owner, section, periodKey, tagId, res?.updatedAt ?? null)
+    cacheSet(owner, section, periodKey, tagId, json, res?.updatedAt ?? null)
     onState?.('saved')
-  } catch {
+  } catch (err) {
+    // 冲突：别的设备/标签页在我加载之后写过同一篇。
+    //
+    // 按海涛的决定，这里**不问用户**，静默地以「我正在打字的这份为准」自动处理：
+    // 重新读一次服务器的当前版本作为基准，再把手上这份写上去。
+    //
+    // 之所以敢自动覆盖：docs 上的 trg_snapshot_doc_revision 会在更新前把被覆盖的
+    // 那一版快照进 doc_revisions —— 内容不会真正消失，只是用户没有自助入口。
+    //
+    // 只自动处理一次（_afterConflict）。第二次还冲突说明有别的东西在持续写，
+    // 这时候必须停下来报错：无限重试等于两边互相覆盖。
+    if (err instanceof DocConflictError) {
+      pending.delete(key)
+      if (_afterConflict) { report('save-conflict', err, { section, periodKey }); onState?.('error'); return }
+      try {
+        const current = await _loadDocWithMeta(owner, section, periodKey, tagId)
+        rememberBase(owner, section, periodKey, tagId, current.updatedAt)
+        await saveDocResilient({ owner, section, periodKey, tagId, json, text }, onState, true)
+      } catch {
+        onState?.('error')
+      }
+      return
+    }
     pending.set(key, payload)
-    onState?.(isOffline() ? 'offline' : 'error')
+    const offline = isOffline()
+    // 保存失败率是这个产品最该被盯住的一个数字 —— 尤其国内走 /sb 那条代理。
+    // 离线不算故障（那是预期内的，队列会补），只报真的失败。
+    if (!offline) report('save', err, { section, periodKey })
+    onState?.(offline ? 'offline' : 'error')
   }
 }
 
 // 重试队列里所有待存的（联网恢复 / 启动时调）。
+//
+// 关键：**不盲目重放**。一份周五断网留下的草稿，如果直接 upsert 上去，
+// 会把周末在手机上写的东西整篇盖掉。所以每条都带着"我基于哪一版"的前置条件，
+// 库里那一版变了就不写，把草稿留在本地等人来决定。
 export async function flushPending() {
   if (isOffline() || pending.size === 0) return
   for (const [key, payload] of [...pending]) {
-    try { await _saveDoc(payload); lsDel(key); pending.delete(key) } catch { /* 留到下次 */ }
+    try {
+      const res = await _saveDoc({ ...payload, expectedUpdatedAt: payload.baseUpdatedAt ?? null })
+      lsDel(key)
+      pending.delete(key)
+      rememberBase(payload.owner, payload.section, payload.periodKey, payload.tagId, res?.updatedAt ?? null)
+    } catch (err) {
+      if (err instanceof DocConflictError) {
+        // 服务器上有更新的内容。草稿保留（不丢字），但退出重试队列，
+        // 免得每次联网都拿旧内容去砸新内容。
+        pending.delete(key)
+        continue
+      }
+      /* 其它错误：留到下次 */
+    }
   }
+}
+
+/**
+ * 忘掉某篇的读缓存 —— 服务端在本客户端之外被改过时用（例如"搬到今天"）。
+ *
+ * 不做这一步的话：搬完之后两边都还显示旧缓存（看起来像没生效），
+ * 而用户如果去编辑那个"还在原地"的块，就会把它整篇写回去 —— 结果是块被复制成两份。
+ */
+export function forgetDocCacheFor(owner, section, periodKey, tagId = null) {
+  const key = docKey(owner, section, periodKey, tagId)
+  docCache.delete(key)
+  baseVersion.delete(key)
+  lsDel(ck(owner, section, periodKey, tagId))
+}
+
+/** 被放弃/被空覆盖前收起来的本地内容（给"找回"用；以前只写不读）。 */
+export function peekLocalBackup(owner, section, periodKey, tagId = null) {
+  return lsGet(bk(owner, section, periodKey, tagId))
+}
+
+/** 还有哪些本地草稿没能落库（上层可以据此提示"有未同步的修改"）。 */
+export function unsyncedDrafts() {
+  const out = []
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (!key || !key.startsWith(LS_PREFIX)) continue
+      const p = lsGet(key)
+      if (p) out.push({ key, owner: p.owner, section: p.section, periodKey: p.periodKey, tagId: p.tagId })
+    }
+  } catch {}
+  return out
 }
 
 // 启动时把上次会话遗留的本地草稿收进重试队列（关标签页/断网遗留也不丢）。
