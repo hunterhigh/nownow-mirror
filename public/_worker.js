@@ -23,9 +23,22 @@ function getSupabaseOrigin(request, env) {
   return ''
 }
 
+// 正式域名启用后（2026-08-09，nownow.cc），老地址 301 到新域名。
+// 重定向精确主机名：老地址 + www 都归到裸域名：
+//   · 预览部署（<hash>.now-now.pages.dev）不重定向 —— 那是拿来验证构建的
+//   · /sb/* 也重定向 —— 老页面已经打不开了，API 也不该再从老域名走
+// 用 301（永久）：让浏览器和搜索引擎记住新地址。
+const CANONICAL_HOST = 'nownow.cc'
+const REDIRECT_HOSTS = new Set(['now-now.pages.dev', 'www.nownow.cc'])
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
+
+    if (REDIRECT_HOSTS.has(url.hostname)) {
+      url.hostname = CANONICAL_HOST
+      return Response.redirect(url.toString(), 301)
+    }
 
     if (url.pathname.startsWith('/sb/')) {
       const supabaseOrigin = getSupabaseOrigin(request, env)
