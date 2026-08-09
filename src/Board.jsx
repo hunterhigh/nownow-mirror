@@ -9,7 +9,7 @@ import AvatarPicker, { avatarSrc } from './components/AvatarPicker'
 import { supabase } from './lib/supabase'
 import { friendlyDbError } from './lib/errors'
 import { inPeriod, offsetOf, periodHeader, periodRange } from './lib/period'
-import { loadMyMentions, loadMentionFrequency } from './lib/docMentionsApi'
+import { loadMyMentions, loadMyCompletions, loadMentionFrequency } from './lib/docMentionsApi'
 import { forgetDocCacheForTags, warmCache } from './lib/resilientDocs'
 import { periodKey } from './lib/periodKey'
 import { archiveTag, createTag as createDocTag, loadDocTags, peekDocTags, rememberDocTags, renameTag as renameDocTag, updateTagOrder } from './lib/tagsApi'
@@ -154,7 +154,8 @@ export default function Board({ session }) {
   const [allEntries, setAllEntries] = useState([])
   const [mentions, setMentions] = useState([])
   const [allMentions, setAllMentions] = useState([])
-  const [docMentions, setDocMentions] = useState([]) // doc 世界的 @我（纯通知：未忽略的，含已读/未读）
+  const [docMentions, setDocMentions] = useState([]) // doc 世界的 @我（未忽略的，含已读/未读）
+  const [docDone, setDocDone] = useState([]) // 别人 ✓ 了我 @ 的事（黄色知会），未点掉的
   const [lastViewed, setLastViewed] = useState(loadLastViewed)
 
   const me = profiles.find((p) => p.id === user.id) || null
@@ -672,6 +673,7 @@ export default function Board({ session }) {
   // 切视图时重拉；通知页里点掉/清空也回调这个，让红点数字当场变（不用跳页）。
   const refreshNotif = useCallback(() => {
     loadMyMentions().then(setDocMentions).catch(() => {})
+    loadMyCompletions().then(setDocDone).catch(() => {})
     loadMentionFrequency().then(setMentionFreq).catch(() => {}) // @选框排序用，顺带刷（量小）
   }, [])
   useEffect(() => { refreshNotif() }, [view, refreshNotif])
@@ -783,10 +785,11 @@ export default function Board({ session }) {
 
   // 「待我处理 / 我派出去的」侧栏入口已按 Haitao 移除；mentions/notifications 底层数据保留，要恢复见 git 3e4455d
   const inboxCount = mentions.length // 还用在手机 ☰ 红点（@我窄条仍在「我的目标」里）
-  // 纯通知模型：红点数「没读过的」。读过没忽略的还留在通知页里，但不再吊着一个红数字 ——
-  // 通知的职责是让你知道，你知道了它就完成了使命（这正是和"任务"的本质区别）。
+  // 红点数「还没让你知道的」：未读的 @ + 未点掉的黄色知会 + 待确认成员。
+  // 读过没忽略的 @ 还留在通知页里，但不再吊着红数字 —— 通知的职责是让你知道，
+  // 你知道了它就完成了使命。
   const unreadAt = docMentions.filter((m) => !m.read_at).length
-  const notifCount = unreadAt + pendingMembers.length
+  const notifCount = unreadAt + docDone.length + pendingMembers.length
 
   // 三格：今日未完成 / 本周未完成（今天还要干啥）+ 累计已完成（成就感，flomo 的"863 笔记"对应物）
   // 搜索跳转：纸拨回那条所在的日期 + 高亮闪烁定位

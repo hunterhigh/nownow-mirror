@@ -1,9 +1,10 @@
 // docs 世界的 @通知读取：doc_mentions = 别人在自己文档里 @ 了我。
-// **纯通知模型**（海涛 2026-08-09 拍板）：@ 就是知会一声，没有完成/未完成的概念。
-// 能做的只有三件事：看（跳过去）、标已读（进页面点开）、忽略（✕ / Clear）。
-// 历史上有过"派活→完成→黄色回执"的任务流；complete_mention / ack_completion
-// 两个 RPC 和 completed_at 列还留在数据库里（不破坏老数据），但前端不再调用。
-// 写入在 docsApi.saveDoc 后的 syncDocMentions；这里只读 + 标已读/忽略。
+// **一切都是通知**（海涛 2026-08-09 拍板）：没有任何地方展示"完成/未完成"的状态。
+// 收到 @ 的人有三个动作，动作做完条目都一样消失：
+//   看（跳过去）· ✕ 忽略（对方无感）· ✓ 处理好了（给对方发一条黄色知会）
+// ✓ 底层复用 completed_at / complete_mention —— 但它只是"给对方发通知"的机制，
+// 列表里从不显示勾选态或横线。黄色知会本身也是普通通知，对方 ✕ 掉即完。
+// 写入在 docsApi.saveDoc 后的 syncDocMentions；这里只读 + 标已读/忽略/知会。
 import { supabase } from './supabase'
 
 // 我收到的 @：join docs 拿 (owner, section, period_key, tag_id) 用于跳转/上下文。降序。
@@ -71,5 +72,44 @@ export async function loadMentionFrequency() {
 /** 忽略一条 @ 通知：从我的列表里移走。对方不会收到任何东西 —— 通知本来就不需要回执。 */
 export async function dismissMention(id) {
   const { error } = await supabase.rpc('dismiss_mention', { p_id: id })
+  if (error) throw error
+}
+
+/** ✓ 处理好了：从我的列表消失 + 给 @ 我的人发一条黄色知会。和 ✕ 的唯一区别是对方会收到通知。 */
+export async function completeMention(id) {
+  const { error } = await supabase.rpc('complete_mention', { p_id: id })
+  if (error) throw error
+}
+
+// 别人处理了我 @ 的事（黄色知会），我还没点掉的。降序。
+export async function loadMyCompletions() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  const user = session?.user
+  if (!user) return []
+  const { data, error } = await supabase
+    .from('doc_mentions')
+    .select('id, mentioned, completed_at, snippet, docs_visible!inner(owner, section, period_key, tag_id)')
+    .eq('author', user.id)
+    .not('completed_at', 'is', null)
+    .is('completion_seen_at', null)
+    .order('completed_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []).map((m) => ({
+    id: m.id,
+    mentioned: m.mentioned,
+    completed_at: m.completed_at,
+    snippet: m.snippet,
+    owner: m.docs_visible.owner,
+    section: m.docs_visible.section,
+    periodKey: m.docs_visible.period_key,
+    tagId: m.docs_visible.tag_id ?? null,
+  }))
+}
+
+/** 点掉一条黄色知会（就是普通通知的 ✕）。 */
+export async function ackCompletion(id) {
+  const { error } = await supabase.rpc('ack_completion', { p_id: id })
   if (error) throw error
 }
