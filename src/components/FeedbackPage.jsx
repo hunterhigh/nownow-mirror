@@ -106,8 +106,9 @@ export default function FeedbackPage({ me, profiles }) {
             <div key={f.id} className="rounded-lg border border-stone-200/60 bg-white px-4 py-3 shadow-sm">
               <div className="flex items-center text-[11.5px]" style={{ color: 'var(--ink-faint)' }}>
                 <span>{fmtTime(f.created_at)} · {who}</span>
+                {/* 垃圾桶和左边的时间·人名同色（var(--ink-faint)）：同一行的辅助元素同一档灰，hover 才转红 */}
                 {isMine && (
-                  <button onClick={() => remove(f)} title="删除这条反馈" aria-label="删除这条反馈" className="ml-auto text-stone-300 hover:text-red-500">
+                  <button onClick={() => remove(f)} title="删除这条反馈" aria-label="删除这条反馈" className="ml-auto hover:!text-red-500" style={{ color: 'var(--ink-faint)' }}>
                     <Trash2 size={13} />
                   </button>
                 )}
