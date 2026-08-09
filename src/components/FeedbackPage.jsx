@@ -79,12 +79,13 @@ export default function FeedbackPage({ me, profiles }) {
         />
         <div className="mt-1 flex items-center">
           {/* ⌘+Enter 仍然能提交，只是不再显示提示（海涛：不需要那行字）。 */}
+          {/* 椭圆（h-8 + px-5 的胶囊形）；hover 高亮的是**底色加深**，不是图标变色（海涛的要求）。 */}
           <button
             onClick={send}
             disabled={submitting || !draft.trim()}
             title="提交反馈"
             aria-label="提交反馈"
-            className="ml-auto flex h-8 w-8 items-center justify-center rounded-full bg-[var(--nav-soft)] text-stone-600 transition-colors hover:text-stone-900 disabled:opacity-70"
+            className="ml-auto flex h-8 items-center justify-center rounded-full bg-[var(--nav-soft)] px-5 text-stone-600 transition-colors hover:bg-stone-300/70 disabled:opacity-70 disabled:hover:bg-[var(--nav-soft)]"
           >
             <SendHorizontal size={15} />
           </button>
