@@ -24,7 +24,7 @@ function stripBlobImages(node) {
 // 时间线里的一个文档块 = 一个 (owner, section, period_key)。
 // 当前周期可写（防抖 600ms 自动落库；永不丢字 + 离线韧性，见 resilientDocs）；过去/别人的只读。
 // fill=当前周期块铺满首屏（点空白也能落光标编辑）。
-export default function DocBlock({ owner, section, periodKey, tagId = null, editable, placeholder, profiles, mentionFreq, mentionStates, fill, onCarry }) {
+export default function DocBlock({ owner, section, periodKey, tagId = null, editable, placeholder, profiles, mentionFreq, fill, onCarry }) {
   // 初值同步读缓存：命中就直接拿来当初值、不经 undefined 占位 → 缓存命中零加载闪（暂存等再点秒显）。
   const [content, setContent] = useState(() => peekDocCache(owner, section, periodKey, tagId)) // undefined=加载中, null=空, obj=PM JSON
   const [saveState, setSaveState] = useState(null) // 'saving'|'saved'|'offline'|'error'|null
@@ -80,7 +80,7 @@ export default function DocBlock({ owner, section, periodKey, tagId = null, edit
         placeholder={placeholder}
         profiles={profiles}
         mentionFreq={mentionFreq}
-        mentionStates={mentionStates}
+       
         uploaderId={owner}
         onChange={({ json, text }) => {
           if (!editable) return

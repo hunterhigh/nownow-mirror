@@ -19,6 +19,7 @@ import { Color } from '@tiptap/extension-color'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { createLowlight, common } from 'lowlight'
 import { Callout } from '../components/Callout'
+import { DateStamp } from '../components/DateStamp'
 import { PrivateBlock } from './privateBlock'
 import { Markdown } from 'tiptap-markdown'
 
@@ -43,6 +44,7 @@ function converter() {
         TableCell,
         Mention,
         Callout,
+        DateStamp,
         PrivateBlock,
         Markdown,
       ],

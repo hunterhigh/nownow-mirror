@@ -1,5 +1,9 @@
-// docs 世界的 @通知读取：doc_mentions = 别人在自己文档里 @ 了我（纯通知，无任务流）。
-// 写入在 docsApi.saveDoc 后的 syncDocMentions；这里只读 + 标已读。
+// docs 世界的 @通知读取：doc_mentions = 别人在自己文档里 @ 了我。
+// **纯通知模型**（海涛 2026-08-09 拍板）：@ 就是知会一声，没有完成/未完成的概念。
+// 能做的只有三件事：看（跳过去）、标已读（进页面点开）、忽略（✕ / Clear）。
+// 历史上有过"派活→完成→黄色回执"的任务流；complete_mention / ack_completion
+// 两个 RPC 和 completed_at 列还留在数据库里（不破坏老数据），但前端不再调用。
+// 写入在 docsApi.saveDoc 后的 syncDocMentions；这里只读 + 标已读/忽略。
 import { supabase } from './supabase'
 
 // 我收到的 @：join docs 拿 (owner, section, period_key, tag_id) 用于跳转/上下文。降序。
@@ -14,9 +18,10 @@ export async function loadMyMentions() {
   if (!user) return []
   const { data, error } = await supabase
     .from('doc_mentions')
-    .select('id, doc_id, author, created_at, read_at, completed_at, snippet, docs_visible!inner(owner, section, period_key, tag_id)')
-    // 被我"忽略"的不再出现在通知里。忽略 ≠ 完成：派活的人不会收到任何完成通知。
+    .select('id, doc_id, author, created_at, read_at, snippet, docs_visible!inner(owner, section, period_key, tag_id)')
+    // 被我"忽略"的不再出现；老任务流里勾过"完成"的也不再翻出来（等同已读已忽略）。
     .is('dismissed_at', null)
+    .is('completed_at', null)
     .eq('mentioned', user.id)
     .order('created_at', { ascending: false })
     .limit(200)
@@ -26,7 +31,6 @@ export async function loadMyMentions() {
     author: m.author,
     created_at: m.created_at,
     read_at: m.read_at,
-    completed_at: m.completed_at, // 已完成的不再隐藏，UI 给它画横线（像勾掉的待办）
     snippet: m.snippet, // 被@那段的文本（通知 snippet）
     owner: m.docs_visible.owner,
     section: m.docs_visible.section,
@@ -41,69 +45,6 @@ export async function markMentionRead(id) {
     .update({ read_at: new Date().toISOString() })
     .eq('id', id)
   if (error) throw error
-}
-
-// 被@人勾「完成」（派活闭环）：写 completed_at，从我收件箱消失、发起人收到黄色完成通知。
-export async function completeMention(id) {
-  const { error } = await supabase.rpc('complete_mention', { p_id: id })
-  if (error) throw error
-}
-
-// 我派出去、对方已完成的活（黄色「X 完成了你派的任务」），未点掉的。降序。
-export async function loadMyCompletions() {
-  // getSession（读本地缓存、无网络）取 user，别用 getUser（每次都打一次 auth 服务器网络往返）。
-  // 通知页每次进入会多处调这俩(Board refreshNotif + NotificationsPage)，getUser 的网络往返叠起来
-  // = 海涛报的「点通知半天才显示内容」。登录态已在 App 启动时校验过(auth-ready)，本地 session 够用。
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  const user = session?.user
-  if (!user) return []
-  const { data, error } = await supabase
-    .from('doc_mentions')
-    .select('id, mentioned, completed_at, snippet, docs_visible!inner(owner, section, period_key, tag_id)')
-    .eq('author', user.id)
-    .not('completed_at', 'is', null)
-    .is('completion_seen_at', null)
-    .order('completed_at', { ascending: false })
-  if (error) throw error
-  return (data ?? []).map((m) => ({
-    id: m.id,
-    mentioned: m.mentioned,
-    completed_at: m.completed_at,
-    snippet: m.snippet, // 被@那段的文本
-    owner: m.docs_visible.owner,
-    section: m.docs_visible.section,
-    periodKey: m.docs_visible.period_key,
-    tagId: m.docs_visible.tag_id ?? null,
-  }))
-}
-
-// 作者点掉黄色完成通知（写 completion_seen_at）。
-export async function ackCompletion(id) {
-  const { error } = await supabase.rpc('ack_completion', { p_id: id })
-  if (error) throw error
-}
-
-// 我派出去的每个 @ 实例的完成态 → {mid: true=已完成 / false=未完成}。
-// 给编辑器里 @ 名字按完成态上色用（完成=黄、未完成=蓝）。按 author=我，故只覆盖自己页上自己派的 @。
-export async function loadMyMentionStates() {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  const user = session?.user
-  if (!user) return {}
-  const { data, error } = await supabase
-    .from('doc_mentions')
-    .select('mention_id, completed_at')
-    .eq('author', user.id)
-    // 无上限地扫"我发出过的所有 @"，而每有人打一个 @ 全场 80 个客户端都会重跑一次。
-    .order('created_at', { ascending: false })
-    .limit(500)
-  if (error) return {}
-  const map = {}
-  for (const r of data ?? []) map[r.mention_id] = r.completed_at != null
-  return map
 }
 
 // 我最常 @ 谁：统计我发出的 @ 次数 → {personId: count}。给 @ 选择框「常用靠前」排序用。
@@ -127,7 +68,7 @@ export async function loadMentionFrequency() {
   return freq
 }
 
-/** 忽略一条派给我的活：从我的通知里移走，但**不**告诉派活的人"我做完了"。 */
+/** 忽略一条 @ 通知：从我的列表里移走。对方不会收到任何东西 —— 通知本来就不需要回执。 */
 export async function dismissMention(id) {
   const { error } = await supabase.rpc('dismiss_mention', { p_id: id })
   if (error) throw error

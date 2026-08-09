@@ -241,11 +241,6 @@
   color: var(--accent);
   font-weight: 600;
 }
-/* 派出去的 @ 任务已被对方完成 → 人名转黄（未完成保持蓝），一眼区分做没做。
-   完成态是外部数据(doc_mentions)，靠 MentionDone decoration 加 .doc-mention-done 类。 */
-.doc-mention.doc-mention-done {
-  color: var(--warning);
-}
 /* 当前周期块铺满首屏：编辑器留出一片可点空白，点任意位置都能落光标（配 DocEditor 的 onMouseDown 聚焦末尾）*/
 .doc-editor-fill {
   min-height: 65vh;
@@ -495,4 +490,37 @@
    --kb-inset 由 App 里的 visualViewport 监听写入（键盘收起时为 0）。 */
 .doc-editor {
   scroll-padding-bottom: var(--kb-inset, 0px);
+}
+
+/* 时间戳（/当前时间 插入的「● 8月9日 周日」，见 DateStamp.js）。
+   圆点用和时间线抬头完全一样的画法：6px 实心圆 + var(--accent)，
+   而不是「•」这个字符 —— 字符会跟着正文颜色走，也能被单独删掉。 */
+.date-stamp {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  white-space: nowrap;
+  color: var(--ink-muted);
+  margin: 0.25rem 0;
+}
+.date-stamp-dot {
+  display: inline-block;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--accent);
+}
+/* 划选一段包含它的文字时，不给它文字那样的蓝色高亮 ——
+   它不是文字，不该看起来"被选中了一半"。 */
+.ProseMirror .date-stamp::selection,
+.ProseMirror .date-stamp *::selection {
+  background: transparent;
+}
+/* "待删"态（第一下退格之后）：整块淡色高亮。
+   这是删除前的最后一个预告 —— 再按一下就真没了。 */
+.ProseMirror .date-stamp.ProseMirror-selectednode {
+  background: var(--nav-soft);
+  border-radius: 6px;
+  outline: none;
 }

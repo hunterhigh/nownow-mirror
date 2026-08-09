@@ -22,11 +22,12 @@ import BlockHandle from './BlockHandle'
 import CarryHandle from './CarryHandle'
 import { SlashCommand } from './SlashCommand'
 import { Callout } from './Callout'
-import { Bold, CheckSquare, ChevronDown, Code, Heading1, Heading2, Heading3, Highlighter, Image as ImageIcon, Info, Italic, List, ListOrdered, Lock, Minus, Quote, Strikethrough, Table as TableIcon, Underline as UnderlineIcon, Unlock } from 'lucide-react'
+import { Bold, CalendarDays, CheckSquare, ChevronDown, Code, Heading1, Heading2, Heading3, Highlighter, Image as ImageIcon, Info, Italic, List, ListOrdered, Lock, Minus, Quote, Strikethrough, Table as TableIcon, Underline as UnderlineIcon, Unlock } from 'lucide-react'
 import { uploadImage } from '../lib/storage'
 import { setUploadProgress, clearUploadProgress } from '../lib/uploadProgress'
 import { PrivateBlock, PrivateBlockLock, toggleBlockPrivate, isBlockPrivate } from '../lib/privateBlock'
-import { MentionDone } from '../lib/mentionDone'
+import { periodHeader } from '../lib/period'
+import { DateStamp } from './DateStamp'
 
 // 隐私 🔒 总开关：必须等数据侧把 docs/版本历史 SELECT 锁成 owner-only（migration-020 STEP 2）后再开。
 // false 时悬浮条显示原来的「引用」按钮、没人能标私密（后端隔离可以先部署、纯打底、无泄露窗口）。
@@ -39,7 +40,7 @@ const TEXT_COLORS = ['#e11d48', '#ea580c', '#ca8a04', '#16a34a', '#2563eb', '#93
 const HL_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8'] // 背景高亮：黄绿蓝粉
 
 // 给 mention 节点加一个稳定唯一的 mid（插入时生成），让「每个 @ = 一条独立通知/任务」：
-// syncDocMentions 按 mid 存 doc_mentions，同一人被 @ 多次也各算各的、各自有 completed_at/snippet。
+// syncDocMentions 按 mid 存 doc_mentions，同一人被 @ 多次也各算各的、各自有 snippet。
 const MentionWithId = Mention.extend({
   addAttributes() {
     return {
@@ -100,7 +101,7 @@ function insertImageFromFile(view, file, uploaderId) {
 // 整页就是一份 ProseMirror 文档。markdown 输入规则、行内格式、悬浮工具条都走原生扩展。
 // content 进：ProseMirror JSON（或空）；out：onChange({ json, text }) —— json 落库、text 喂搜索/RLS。
 // @提及 / 图片插入 下一步加；Yjs/协作（老铁的 DO）等同篇协作需求出现再叠。
-export default function DocEditor({ content, onChange, placeholder = '写点什么…', editable = true, profiles = [], mentionFreq = {}, mentionStates = {}, uploaderId, fill = false, onCarry }) {
+export default function DocEditor({ content, onChange, placeholder = '写点什么…', editable = true, profiles = [], mentionFreq = {}, uploaderId, fill = false, onCarry }) {
   // @ 弹选：suggestion 的 items/onKeyDown 需读最新 profiles/选中态 → 用 ref 兜
   const profilesRef = useRef(profiles)
   profilesRef.current = profiles
@@ -108,8 +109,6 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
   const freqRef = useRef(mentionFreq)
   freqRef.current = mentionFreq
   // 我派的 @ 完成态 {mid: 已完成bool}，给文档里 @ 人名上色（黄=已完成/蓝=未完成）。ref 兜，decoration 闭包读最新。
-  const doneRef = useRef(mentionStates)
-  doneRef.current = mentionStates
   const [sug, setSug] = useState(null) // { items, rect, command, index } | null
   const sugRef = useRef(null)
   sugRef.current = sug
@@ -123,6 +122,14 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
 
   const slashItems = [
     { title: '待办清单', icon: CheckSquare, kw: 'todo task daiban 待办 清单', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleTaskList().run() },
+    // 当前时间：插一个 dateStamp 节点（不是文字，理由见 DateStamp.js）。
+    // 显示文本**复用 periodHeader('today')** —— 时间线抬头用的同一个函数，
+    // 而不是另写一套 `${m}月${d}日`：那样一改格式（比如跨年补「2027年」）就会两处对不上。
+    //
+    // 值在**点击这一刻**算好冻进 attrs。开着标签页跨过午夜的话，
+    // 提前算好的那份会插入昨天；而事后现算的话，昨天写的记录明天看会变成明天。
+    // 它是块级的、独占一行；后面跟一个空段落，光标落在下一行接着写。
+    { title: '当前时间', icon: CalendarDays, kw: 'date time 时间 日期 今天 today shijian riqi', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).insertContent([{ type: 'dateStamp', attrs: { at: new Date().toISOString(), label: periodHeader('today', 0) } }, { type: 'paragraph' }]).run() },
     { title: '标题 1', icon: Heading1, kw: 'h1 标题 title', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 1 }).run() },
     { title: '标题 2', icon: Heading2, kw: 'h2 标题', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 2 }).run() },
     { title: '标题 3', icon: Heading3, kw: 'h3 标题', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 3 }).run() },
@@ -161,9 +168,9 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
       TableHeader,
       TableCell,
       Callout,
+      DateStamp,
       PrivateBlock, // 逐行私密：给块加 attrs.private（数据侧按它剥离 public 投影）
       PrivateBlockLock, // 私密块右上角可点的解锁角标（widget）
-      MentionDone(() => doneRef.current), // 文档里 @ 人名按完成态上色（黄=已完成/蓝=未完成）
       // 块拖拽抓手改用官方 @tiptap/extension-drag-handle-react（见下方 JSX 的 <BlockHandle/>），
       // 不再走自维护 fork——官方版和 PM 的文本选择/dropcursor/拖进列表配套，IME 安全。
       SlashCommand.configure({
@@ -295,11 +302,6 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
     if (editor && editor.isEditable !== editable) editor.setEditable(editable)
   }, [editor, editable])
 
-  // 完成态变了（对方点完成→Board 重拉 mentionStates）→ 派一个空事务触发 MentionDone 重算上色。
-  // 无 doc 变更 + addToHistory:false → 不触发 onUpdate 保存、不进撤销栈。
-  useEffect(() => {
-    if (editor) editor.view.dispatch(editor.state.tr.setMeta('addToHistory', false).setMeta('mentionDoneRefresh', true))
-  }, [editor, mentionStates])
 
   if (!editor) return null
 
@@ -337,6 +339,9 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
           if (!editor.isEditable) return false
           // 选中图片(NodeSelection)时不弹文字气泡，交给图片自己的工具条
           if (editor.isActive('image')) return false
+          // 时间戳（含"待删"选中态）也不弹：它不接受任何格式，
+          // 弹一排全都不适用的按钮只会诱导误操作（真正挡格式的是 DateStamp 里的插件）
+          if (editor.isActive('dateStamp')) return false
           return !state.selection.empty
         }}
         className="flex items-center gap-0.5 rounded-lg border border-stone-200 bg-[var(--surface-elevated)] p-1 text-stone-600 shadow-[0_8px_24px_rgba(0,0,0,0.06)]"

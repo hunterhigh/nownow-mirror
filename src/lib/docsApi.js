@@ -129,6 +129,8 @@ function blockText(node, items) {
     if (node.attrs?.id) items.push({ id: node.attrs.id, mid: node.attrs.mid || null })
     return '@' + (node.attrs?.label || '')
   }
+  // dateStamp 是 atom，文字在 attrs.label 里而不是子节点，不写这一条就搜不到日期。
+  if (node.type === 'dateStamp') return node.attrs?.label || ''
   if (Array.isArray(node.content)) return node.content.map((c) => blockText(c, items)).join('')
   return ''
 }

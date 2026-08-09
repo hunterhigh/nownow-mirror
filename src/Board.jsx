@@ -9,7 +9,7 @@ import AvatarPicker, { avatarSrc } from './components/AvatarPicker'
 import { supabase } from './lib/supabase'
 import { friendlyDbError } from './lib/errors'
 import { inPeriod, offsetOf, periodHeader, periodRange } from './lib/period'
-import { loadMyMentions, loadMyCompletions, loadMentionFrequency, loadMyMentionStates } from './lib/docMentionsApi'
+import { loadMyMentions, loadMentionFrequency } from './lib/docMentionsApi'
 import { forgetDocCacheForTags, warmCache } from './lib/resilientDocs'
 import { periodKey } from './lib/periodKey'
 import { archiveTag, createTag as createDocTag, loadDocTags, peekDocTags, rememberDocTags, renameTag as renameDocTag, updateTagOrder } from './lib/tagsApi'
@@ -149,14 +149,12 @@ export default function Board({ session }) {
   const user = session.user
   const [profiles, setProfiles] = useState([])
   const [mentionFreq, setMentionFreq] = useState({}) // 我 @ 各人的次数 {id:count}，@选框「常用靠前」用
-  const [mentionStates, setMentionStates] = useState({}) // 我派的 @ 完成态 {mid:bool}，文档里 @ 人名上色用
   const [needSetup, setNeedSetup] = useState(false)
   const [pageUserId, setPageUserId] = useState(null)
   const [allEntries, setAllEntries] = useState([])
   const [mentions, setMentions] = useState([])
   const [allMentions, setAllMentions] = useState([])
-  const [docMentions, setDocMentions] = useState([]) // doc 世界的 @我（含已读/未读/已完成）
-  const [docDone, setDocDone] = useState([]) // 我派的活、对方完成了（黄色），未点掉的
+  const [docMentions, setDocMentions] = useState([]) // doc 世界的 @我（纯通知：未忽略的，含已读/未读）
   const [lastViewed, setLastViewed] = useState(loadLastViewed)
 
   const me = profiles.find((p) => p.id === user.id) || null
@@ -671,17 +669,13 @@ export default function Board({ session }) {
   const [mobileSearch, setMobileSearch] = useState(false) // 手机端搜索页模式
   const [view, setView] = useState('paper') // paper | notifications | all
 
-  // 侧栏通知数 = 未完成的派活 + 对方完成待我知道 + 待确认成员。
-  // 切视图时重拉；通知页里勾完成/点掉黄条也回调这个，让红点数字当场变（不用跳页）。
+  // 切视图时重拉；通知页里点掉/清空也回调这个，让红点数字当场变（不用跳页）。
   const refreshNotif = useCallback(() => {
     loadMyMentions().then(setDocMentions).catch(() => {})
-    loadMyCompletions().then(setDocDone).catch(() => {})
     loadMentionFrequency().then(setMentionFreq).catch(() => {}) // @选框排序用，顺带刷（量小）
-    loadMyMentionStates().then(setMentionStates).catch(() => {}) // 文档里 @ 人名完成态上色，对方点完成后随刷新转黄
   }, [])
   useEffect(() => { refreshNotif() }, [view, refreshNotif])
-  // 对方点完成 / 被 @ 时实时刷通知态（含文档里 @ 人名上色用的 mentionStates）→ 人名当场转黄，不用手刷。
-  // mentionStates 变 → DocEditor 的 effect 派空事务触发 MentionDone 重算上色。
+  // 被 @ / 对方改动时实时刷通知（红点数字跟着变，不用手刷）。
   useEffect(() => {
     const ch = supabase
       .channel('nownow_doc_mentions')
@@ -789,8 +783,10 @@ export default function Board({ session }) {
 
   // 「待我处理 / 我派出去的」侧栏入口已按 Haitao 移除；mentions/notifications 底层数据保留，要恢复见 git 3e4455d
   const inboxCount = mentions.length // 还用在手机 ☰ 红点（@我窄条仍在「我的目标」里）
-  const pendingAt = docMentions.filter((m) => !m.completed_at).length // 我没完成的派活（读没读都算，做完才消）
-  const notifCount = pendingAt + docDone.length + pendingMembers.length
+  // 纯通知模型：红点数「没读过的」。读过没忽略的还留在通知页里，但不再吊着一个红数字 ——
+  // 通知的职责是让你知道，你知道了它就完成了使命（这正是和"任务"的本质区别）。
+  const unreadAt = docMentions.filter((m) => !m.read_at).length
+  const notifCount = unreadAt + pendingMembers.length
 
   // 三格：今日未完成 / 本周未完成（今天还要干啥）+ 累计已完成（成就感，flomo 的"863 笔记"对应物）
   // 搜索跳转：纸拨回那条所在的日期 + 高亮闪烁定位
@@ -1225,7 +1221,6 @@ export default function Board({ session }) {
                     viewportH={viewportH}
                     profiles={profiles}
                     mentionFreq={mentionFreq}
-                    mentionStates={mentionStates}
                     flashKey={flashDoc && flashDoc.section === channel ? flashDoc.periodKey : null}
                     refreshNonce={docRefreshNonce}
                   />

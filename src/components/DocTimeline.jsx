@@ -34,7 +34,7 @@ function setCachedPeriodKeys(owner, section, tagId = null, keys) {
 
 // 一个频道的文档时间线：当前周期可写（占首屏）、过去有内容的周期只读、往下回溯。
 // owner=正在看谁的页；section=今日/本周/本月/收集箱；isMyPage=能不能写。
-export default function DocTimeline({ owner, section, tagId = null, isMyPage, baseDate, viewportH, profiles, mentionFreq, mentionStates, flashKey, refreshNonce = 0 }) {
+export default function DocTimeline({ owner, section, tagId = null, isMyPage, baseDate, viewportH, profiles, mentionFreq, flashKey, refreshNonce = 0 }) {
   const curKey = periodKey(section, 0, baseDate)
   const tagKey = tagId || 'default'
   const [pastKeys, setPastKeys] = useState([])
@@ -114,7 +114,7 @@ export default function DocTimeline({ owner, section, tagId = null, isMyPage, ba
   if (section === 'stash') {
     return (
       <div id="doc-stash-stash" className={'pt-1' + (flashKey === 'stash' ? ' doc-flash' : '')}>
-        <DocBlock key={`stash-${owner}-${tagKey}`} owner={owner} section="stash" periodKey="stash" tagId={tagId} editable={isMyPage} placeholder="写点什么…" profiles={profiles} mentionFreq={mentionFreq} mentionStates={mentionStates} fill />
+        <DocBlock key={`stash-${owner}-${tagKey}`} owner={owner} section="stash" periodKey="stash" tagId={tagId} editable={isMyPage} placeholder="写点什么…" profiles={profiles} mentionFreq={mentionFreq} fill />
       </div>
     )
   }
@@ -128,7 +128,7 @@ export default function DocTimeline({ owner, section, tagId = null, isMyPage, ba
           <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: 'var(--accent)' }} aria-hidden />
           {periodHeader(section, 0, baseDate)}
         </div>
-        <DocBlock key={`${owner}-${section}-${curKey}-${tagKey}-${reloadNonce}`} owner={owner} section={section} periodKey={curKey} tagId={tagId} editable={isMyPage} placeholder="写点什么…" profiles={profiles} mentionFreq={mentionFreq} mentionStates={mentionStates} fill />
+        <DocBlock key={`${owner}-${section}-${curKey}-${tagKey}-${reloadNonce}`} owner={owner} section={section} periodKey={curKey} tagId={tagId} editable={isMyPage} placeholder="写点什么…" profiles={profiles} mentionFreq={mentionFreq} fill />
       </div>
       {/* 过去：只读，往下回溯 */}
       {pastKeysInScope.map((k) => (
@@ -148,7 +148,7 @@ export default function DocTimeline({ owner, section, tagId = null, isMyPage, ba
             placeholder="写点什么…"
             profiles={profiles}
             mentionFreq={mentionFreq}
-            mentionStates={mentionStates}
+           
             onCarry={isMyPage && section === 'today' ? (blockIndex) => carry(k, blockIndex) : undefined}
           />
         </div>
