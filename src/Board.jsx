@@ -910,14 +910,14 @@ export default function Board({ session }) {
           </button>
           {/* 手机：通知/设置收进右侧（flomo 式抽屉头），点击进对应整页 */}
           <span className="-mr-2.5 ml-auto flex items-center gap-0.5 md:hidden">
-            <button onClick={() => setView('feedback')} className="p-1.5 text-stone-500" title="反馈" aria-label="反馈">
-              <MessageSquarePlus size={22} />
-            </button>
             <button onClick={() => setView('notifications')} className="relative p-1.5 text-stone-500" title="通知" aria-label="通知">
               <Bell size={22} />
               {notifCount > 0 && (
                 <span className="absolute right-0.5 top-0.5 rounded-full bg-red-500 px-1 text-[10px] font-medium leading-[14px] text-white">{notifCount}</span>
               )}
+            </button>
+            <button onClick={() => setView('feedback')} className="p-1.5 text-stone-500" title="反馈" aria-label="反馈">
+              <MessageSquarePlus size={22} />
             </button>
             <button onClick={() => setView('settings')} className="p-1.5 text-stone-500" title="设置" aria-label="设置">
               <Settings size={22} />
@@ -981,17 +981,8 @@ export default function Board({ session }) {
             </SortableContext>
           </DndContext>
         </div>
-        {/* 底部：反馈 + 通知（完整页面）+ 设置（桌面；手机入口在抽屉头名字右侧） */}
+        {/* 底部：通知 + 反馈 + 设置（桌面；手机入口在抽屉头名字右侧） */}
         <div className="mt-auto max-md:hidden">
-          <button
-            onClick={() => setView(view === 'feedback' ? 'paper' : 'feedback')}
-            className={
-              'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[14px] hover:bg-[var(--nav-soft)] ' +
-              (view === 'feedback' ? 'bg-[var(--nav-soft)] font-medium text-stone-900' : 'text-stone-500')
-            }
-          >
-            <MessageSquarePlus size={16} /> 反馈
-          </button>
           <button
             onClick={() => setView(view === 'notifications' ? 'paper' : 'notifications')}
             className={
@@ -1005,6 +996,15 @@ export default function Board({ session }) {
                 {notifCount}
               </span>
             )}
+          </button>
+          <button
+            onClick={() => setView(view === 'feedback' ? 'paper' : 'feedback')}
+            className={
+              'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[14px] hover:bg-[var(--nav-soft)] ' +
+              (view === 'feedback' ? 'bg-[var(--nav-soft)] font-medium text-stone-900' : 'text-stone-500')
+            }
+          >
+            <MessageSquarePlus size={16} /> 反馈
           </button>
           <button
             onClick={() => setSettingsOpen(true)}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { MessageSquarePlus, Trash2 } from 'lucide-react'
+import { MessageSquarePlus, SendHorizontal, Trash2 } from 'lucide-react'
 import { listFeedback, submitFeedback, deleteFeedback } from '../lib/feedbackApi'
 
 // 反馈墙（独立页面，侧栏「反馈」入口，在通知上面）。
@@ -66,7 +66,8 @@ export default function FeedbackPage({ me, profiles }) {
 
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
 
-      <div className="rounded-lg border border-stone-200/80 bg-[var(--surface-elevated)] p-3">
+      {/* 输入框用纯白：页面背景是米色，同色系容器会"陷"进背景里（海涛："偏白一点"）。卡片仍用 surface-elevated 区分层级。 */}
+      <div className="rounded-lg border border-stone-200/80 bg-white p-3 shadow-sm">
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -77,13 +78,15 @@ export default function FeedbackPage({ me, profiles }) {
           className="w-full resize-none bg-transparent text-[13.5px] leading-relaxed outline-none placeholder:text-stone-400 max-md:text-[15px]"
         />
         <div className="mt-1 flex items-center">
-          <span className="text-[11px] text-stone-400">⌘+Enter 也可以提交</span>
+          {/* ⌘+Enter 仍然能提交，只是不再显示提示（海涛：不需要那行字）。 */}
           <button
             onClick={send}
             disabled={submitting || !draft.trim()}
-            className="ml-auto flex h-7 items-center gap-1 rounded-full bg-[var(--nav-soft)] px-3 text-[13px] text-stone-600 transition-colors hover:text-stone-900 disabled:opacity-70"
+            title="提交反馈"
+            aria-label="提交反馈"
+            className="ml-auto flex h-8 w-8 items-center justify-center rounded-full bg-[var(--nav-soft)] text-stone-600 transition-colors hover:text-stone-900 disabled:opacity-70"
           >
-            <MessageSquarePlus size={14} /> {submitting ? '提交中…' : '提交反馈'}
+            <SendHorizontal size={15} />
           </button>
         </div>
       </div>
