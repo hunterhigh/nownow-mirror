@@ -6,11 +6,34 @@ import { periodHeaderFromKey } from '../lib/periodKey'
 
 const SECTION_LABELS = { today: '今日', week: '本周', month: '本月', stash: '收集箱' }
 
-// 模块级缓存：再次进通知页时先用上次的数据秒显（不再空白等网络），后台再刷新。
-// 按账号隔离（cachedUserId）：缓存只在属于当前登录账号时才拿来 seed——同浏览器换号登录不串上个账号的通知。
+// 两级缓存，目标都是「进页面先显示上次的内容，网络在后台追」：
+// · 模块级变量：同一次会话里往返通知页，秒显。
+// · localStorage：**刷新后**模块变量清零，没有这层就会先白一片再出内容
+//   （海涛报的就是这个）—— 文档页早就这么做了（resilientDocs），通知页补齐。
+// 按账号隔离（key 带 userId）：同浏览器换号登录不串上个账号的通知。
 let cachedUserId = null
 let cachedMentions = []
 let cachedCompletions = []
+
+const lsKey = (uid) => `nownow_notifcache:${uid}`
+function seedFromStorage(uid) {
+  if (!uid) return { m: [], c: [] }
+  if (cachedUserId === uid) return { m: cachedMentions, c: cachedCompletions }
+  try {
+    const raw = localStorage.getItem(lsKey(uid))
+    if (raw) {
+      const { m, c } = JSON.parse(raw)
+      return { m: Array.isArray(m) ? m : [], c: Array.isArray(c) ? c : [] }
+    }
+  } catch { /* 坏数据当没有 */ }
+  return { m: [], c: [] }
+}
+function persistCache(uid) {
+  if (!uid) return
+  try {
+    localStorage.setItem(lsKey(uid), JSON.stringify({ m: cachedMentions, c: cachedCompletions }))
+  } catch { /* 配额满不挡功能：缓存丢了就是下次多白一下 */ }
+}
 
 // 通知中心 —— **一切都是通知**（海涛 2026-08-09 拍板）：
 // ① @我的：别人在文档里 @ 了我。✕ = 忽略（对方无感）、✓ = 处理好了（给对方发条黄色知会）。
@@ -18,16 +41,15 @@ let cachedCompletions = []
 // ② 黄色知会：别人 ✓ 了我 @ 的事。就是普通通知，✕ 点掉即完。
 // ③ 待确认成员：这不是通知，是要你做的决定（通过/拒绝），所以 Clear 永远不碰它。
 export default function NotificationsPage({ me, pendingMembers = [], profiles, onMembersChanged, onJumpDoc, onChanged }) {
-  const mine = cachedUserId === me?.id // 缓存归当前账号才用，换号则从空开始（防串号）
-  const [mentions, setMentions] = useState(mine ? cachedMentions : [])
-  const [completions, setCompletions] = useState(mine ? cachedCompletions : [])
+  const [mentions, setMentions] = useState(() => seedFromStorage(me?.id).m)
+  const [completions, setCompletions] = useState(() => seedFromStorage(me?.id).c)
   const [operationError, setOperationError] = useState('')
 
   useEffect(() => {
     let alive = true
     const refresh = () => {
-      loadMyMentions().then((r) => { cachedMentions = r; cachedUserId = me?.id; if (alive) setMentions(r) }).catch(() => {})
-      loadMyCompletions().then((r) => { cachedCompletions = r; cachedUserId = me?.id; if (alive) setCompletions(r) }).catch(() => {})
+      loadMyMentions().then((r) => { cachedMentions = r; cachedUserId = me?.id; persistCache(me?.id); if (alive) setMentions(r) }).catch(() => {})
+      loadMyCompletions().then((r) => { cachedCompletions = r; cachedUserId = me?.id; persistCache(me?.id); if (alive) setCompletions(r) }).catch(() => {})
     }
     refresh()
     // 页面开着时也实时刷新 —— 修掉「红点说 3、页面显示 2」的错位（以前只有侧栏红点订阅了 realtime）
@@ -66,12 +88,14 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
     setList((xs) => xs.filter((x) => x.id !== item.id))
     if (isMention) cachedMentions = cachedMentions.filter((x) => x.id !== item.id)
     else cachedCompletions = cachedCompletions.filter((x) => x.id !== item.id)
+    persistCache(me?.id)
     rpc(item.id)
       .then(() => onChanged?.())
       .catch(() => {
         setList(prev)
         if (isMention) cachedMentions = prev
         else cachedCompletions = prev
+        persistCache(me?.id)
         setOperationError(errMsg)
       })
   }
@@ -102,6 +126,7 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
       setCompletions([])
       cachedMentions = []
       cachedCompletions = []
+      persistCache(me?.id)
       onChanged?.()
     } catch {
       setOperationError('清空失败，请重试。')
@@ -190,9 +215,11 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
                   {m.snippet ? (
                     <>
                       <div className="truncate" style={{ color: dim ? 'var(--ink-muted)' : 'var(--ink)' }}>{m.snippet}</div>
-                      {/* 区头已说明这是 @；每条只留 谁 · 什么时候，不再重复"@了你" */}
-                      <div className="mt-0.5 truncate text-[11.5px]" style={{ color: 'var(--ink-faint)' }}>
-                        <b style={{ color: 'var(--ink-muted)' }}>{who}</b> · {ctx}
+                      {/* 区头已说明这是 @；每条只留 谁 · 什么时候。整行同一个浅色 ——
+                          名字不单独加深：次行是辅助信息，内部再分层次就"乱"了（海涛原话）。
+                          mt-1(4px)：和正文拉开一点但仍属于同一条，6px 就开始像两条了。 */}
+                      <div className="mt-1 truncate text-[11.5px]" style={{ color: 'var(--ink-faint)' }}>
+                        {who} · {ctx}
                       </div>
                     </>
                   ) : (
@@ -220,14 +247,15 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
           {completions.map((c) => {
             const who = profiles?.find((p) => p.id === c.mentioned)?.display_name || '有人'
             const ctx = c.section === 'stash' ? '收集箱' : periodHeaderFromKey(c.section, c.periodKey)
-            // pl-6 = 蓝区方框(16px)+间距(8px)：两个区的文本列左缘对齐，扫起来是一条线
+            // 不跟蓝区对齐缩进：这区没有方框，空出 24px 反而像缺了什么（海涛的判断，
+            // 推翻了我上一版"两区共线"的做法 —— 区内自洽比跨区对齐更重要）。
             return (
-              <div key={c.id} className="flex items-start gap-2 py-1 pl-6 text-[13.5px] max-md:py-1.5 max-md:text-[15.5px]">
+              <div key={c.id} className="flex items-start gap-2 py-1 text-[13.5px] max-md:py-1.5 max-md:text-[15.5px]">
                 <div className="min-w-0 flex-1">
                   <div className="truncate" style={{ color: 'var(--ink)' }}>{c.snippet || '（无内容）'}</div>
-                  {/* 区头已说明这是"已完成"；每条只留 谁 · 什么时候 */}
-                  <div className="mt-0.5 truncate text-[11.5px]" style={{ color: 'var(--ink-faint)' }}>
-                    <b style={{ color: 'var(--ink-muted)' }}>{who}</b> · {ctx}
+                  {/* 次行规则与蓝区完全一致：同浅色、mt-1 */}
+                  <div className="mt-1 truncate text-[11.5px]" style={{ color: 'var(--ink-faint)' }}>
+                    {who} · {ctx}
                   </div>
                 </div>
                 <button onClick={() => ackDone(c)} title="知道了" aria-label="知道了" className="mt-0.5 shrink-0 text-stone-400 hover:text-stone-600">
