@@ -1,5 +1,5 @@
 import { Node, mergeAttributes } from '@tiptap/core'
-import { NodeSelection, Plugin, TextSelection } from '@tiptap/pm/state'
+import { NodeSelection, Plugin, Selection, TextSelection } from '@tiptap/pm/state'
 
 // 时间戳：`/当前时间` 插进来的「● 8月9日 周日」—— 独占一行的块级节点。
 //
@@ -89,9 +89,15 @@ export const DateStamp = Node.create({
     const twoStep = (dir) => () =>
       this.editor.commands.command(({ state, tr }) => {
         const sel = state.selection
-        // 已处于"待删"：这一下真删
+        // 已处于"待删"：这一下真删。删完光标回**上面一行的行尾** ——
+        // 默认会落到下面那行，但删除的手是从上往下收的，视线在上面（海涛的观察）。
+        // 没有上一行（时间戳是文档第一个块）才退而落到下一行。
         if (sel instanceof NodeSelection && sel.node.type.name === this.name) {
+          const at = sel.from
           tr.deleteSelection()
+          const $at = tr.doc.resolve(Math.min(at, tr.doc.content.size))
+          const near = Selection.findFrom($at, -1, true) || Selection.findFrom($at, 1, true)
+          if (near) tr.setSelection(near)
           return true
         }
         const $c = sel.$cursor

@@ -113,6 +113,25 @@ describe('时间戳：是记录，不是文字', () => {
     ed.destroy()
   })
 
+  it('两下删除后：光标落在上一行的行尾，不是下一行', () => {
+    const ed = new Editor({
+      extensions: [StarterKit.configure({ codeBlock: false }), DateStamp],
+      content: { type: 'doc', content: [
+        { type: 'paragraph', content: [{ type: 'text', text: '上面' }] },
+        { type: 'dateStamp', attrs: { at: AT, label: '8月9日 周日' } },
+        { type: 'paragraph', content: [{ type: 'text', text: '下面' }] },
+      ] },
+    })
+    // 光标放到「下面」行首（上段 0-4，stamp 4-5，下段文本从 6 起）
+    ed.commands.setTextSelection(6)
+    press(ed, 'Backspace') // 待删
+    press(ed, 'Backspace') // 真删
+    const sel = ed.state.selection
+    expect(sel.$from.parent.textContent).toBe('上面')
+    expect(sel.$from.parentOffset).toBe(2) // 行尾
+    ed.destroy()
+  })
+
   it('值冻在 attrs 里，不是渲染时现算的「今天」', () => {
     const ed = editor()
     let found = null
