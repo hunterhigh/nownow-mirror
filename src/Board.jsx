@@ -147,7 +147,15 @@ function SetupCard({ user, onDone }) {
 
 export default function Board({ session }) {
   const user = session.user
-  const [profiles, setProfiles] = useState([])
+  // 成员列表先用上次缓存的（localStorage）：刷新后侧栏不再"先空一下再冒出名字"。
+  // 网络回来后覆盖成最新。needSetup 只由**新鲜数据**决定（loadProfiles 里），缓存不参与。
+  const [profiles, setProfiles] = useState(() => {
+    try {
+      const raw = localStorage.getItem(`nownow_profiles_cache:${session.user.id}`)
+      if (raw) { const v = JSON.parse(raw); if (Array.isArray(v)) return v }
+    } catch { /* 坏数据当没有 */ }
+    return []
+  })
   const [mentionFreq, setMentionFreq] = useState({}) // 我 @ 各人的次数 {id:count}，@选框「常用靠前」用
   const [needSetup, setNeedSetup] = useState(false)
   const [pageUserId, setPageUserId] = useState(null)
@@ -254,6 +262,7 @@ export default function Board({ session }) {
       return
     }
     setProfiles(data || [])
+    try { localStorage.setItem(`nownow_profiles_cache:${user.id}`, JSON.stringify(data || [])) } catch { /* 配额满不挡功能 */ }
     setMyInviteTokens((inv || []).map((i) => i.token))
     setNeedSetup(!(data || []).some((p) => p.id === user.id))
   }, [user.id])

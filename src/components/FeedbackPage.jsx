@@ -14,8 +14,32 @@ function fmtTime(iso) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
+// 两级缓存（和通知页同一套）：模块变量管同会话往返，localStorage 管刷新后首屏。
+// 进页面先显示上次的列表，网络在后台追 —— 不再"每次点进来都白一下"。
+let cachedFeedback = null
+let cachedUserId = null
+const FB_LS_KEY = (uid) => `nownow_feedback_cache:${uid}`
+function seedFeedback(uid) {
+  if (cachedUserId === uid && cachedFeedback) return cachedFeedback
+  try {
+    const raw = localStorage.getItem(FB_LS_KEY(uid))
+    if (raw) { const v = JSON.parse(raw); if (Array.isArray(v)) return v }
+  } catch { /* 坏数据当没有 */ }
+  return []
+}
+
 export default function FeedbackPage({ me, profiles }) {
-  const [feedback, setFeedback] = useState([])
+  const [feedback, setFeedbackState] = useState(() => seedFeedback(me?.id))
+  // 所有 setFeedback 都走这里：状态、模块缓存、localStorage 三处一起更新，永不脱节
+  const setFeedback = (updater) => {
+    setFeedbackState((xs) => {
+      const next = typeof updater === 'function' ? updater(xs) : updater
+      cachedFeedback = next
+      cachedUserId = me?.id
+      try { localStorage.setItem(FB_LS_KEY(me?.id), JSON.stringify(next.slice(0, 50))) } catch { /* 配额满不挡功能 */ }
+      return next
+    })
+  }
   const [draft, setDraft] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
