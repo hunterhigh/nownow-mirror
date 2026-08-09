@@ -166,8 +166,8 @@ function ResizableImageView({ node, updateAttributes, editor, selected }) {
             </span>
           </span>
           <span className={TB} contentEditable={false}>
-            <button type="button" className={tbtn(true)} onMouseDown={applyCrop} title="完成裁剪"><Check size={15} strokeWidth={2.2} /></button>
-            <button type="button" className={tbtn(false)} onMouseDown={cancelCrop} title="取消"><X size={15} strokeWidth={2.2} /></button>
+            <button type="button" className={tbtn(true)} onMouseDown={applyCrop} title="完成裁剪" aria-label="完成裁剪"><Check size={15} strokeWidth={2.2} /></button>
+            <button type="button" className={tbtn(false)} onMouseDown={cancelCrop} title="取消" aria-label="取消"><X size={15} strokeWidth={2.2} /></button>
           </span>
         </span>
       </NodeViewWrapper>
@@ -231,11 +231,11 @@ function ResizableImageView({ node, updateAttributes, editor, selected }) {
         {editable && selected && (
           <>
             <span className={TB} contentEditable={false}>
-              <button type="button" className={tbtn(align === 'left')} onMouseDown={setAlign('left')} title="左对齐"><AlignLeft size={15} strokeWidth={2.2} /></button>
-              <button type="button" className={tbtn(align === 'center')} onMouseDown={setAlign('center')} title="居中"><AlignCenter size={15} strokeWidth={2.2} /></button>
-              <button type="button" className={tbtn(align === 'right')} onMouseDown={setAlign('right')} title="右对齐"><AlignRight size={15} strokeWidth={2.2} /></button>
+              <button type="button" className={tbtn(align === 'left')} onMouseDown={setAlign('left')} title="左对齐" aria-label="左对齐"><AlignLeft size={15} strokeWidth={2.2} /></button>
+              <button type="button" className={tbtn(align === 'center')} onMouseDown={setAlign('center')} title="居中" aria-label="居中"><AlignCenter size={15} strokeWidth={2.2} /></button>
+              <button type="button" className={tbtn(align === 'right')} onMouseDown={setAlign('right')} title="右对齐" aria-label="右对齐"><AlignRight size={15} strokeWidth={2.2} /></button>
               <span className="mx-0.5 h-4 w-px bg-stone-200" />
-              <button type="button" className={tbtn(!!crop)} onMouseDown={enterCrop} title="裁剪"><Crop size={15} strokeWidth={2.2} /></button>
+              <button type="button" className={tbtn(!!crop)} onMouseDown={enterCrop} title="裁剪" aria-label="裁剪"><Crop size={15} strokeWidth={2.2} /></button>
               <span className="mx-0.5 h-4 w-px bg-stone-200" />
               {/* 图片私密：未锁=🔒(点设私密)、已锁=🔓(点取消)。后端按 attrs.private 剥离、别人彻底看不到 */}
               <button
@@ -247,10 +247,10 @@ function ResizableImageView({ node, updateAttributes, editor, selected }) {
                 {node.attrs.private ? <Unlock size={15} strokeWidth={2.2} /> : <Lock size={15} strokeWidth={2.2} />}
               </button>
             </span>
-            <span className="doc-img-handle tl" onPointerDown={startResize(-1)} title="拖拽缩放" />
-            <span className="doc-img-handle tr" onPointerDown={startResize(1)} title="拖拽缩放" />
-            <span className="doc-img-handle bl" onPointerDown={startResize(-1)} title="拖拽缩放" />
-            <span className="doc-img-handle br" onPointerDown={startResize(1)} title="拖拽缩放" />
+            <span className="doc-img-handle tl" onPointerDown={startResize(-1)} title="拖拽缩放" aria-label="拖拽缩放" />
+            <span className="doc-img-handle tr" onPointerDown={startResize(1)} title="拖拽缩放" aria-label="拖拽缩放" />
+            <span className="doc-img-handle bl" onPointerDown={startResize(-1)} title="拖拽缩放" aria-label="拖拽缩放" />
+            <span className="doc-img-handle br" onPointerDown={startResize(1)} title="拖拽缩放" aria-label="拖拽缩放" />
           </>
         )}
       </span>

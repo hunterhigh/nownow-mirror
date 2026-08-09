@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, ChevronRight, Copy, Download, Link2, LogOut, Settings as SettingsIcon, Upload, UserPlus, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Copy, Download, Link2, LogOut, Settings as SettingsIcon, UserPlus, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { friendlyDbError } from '../lib/errors'
-import { docJsonToMarkdown, markdownToDocJson, docJsonToText } from '../lib/markdown'
-import { loadDocResilient, saveDocResilient } from '../lib/resilientDocs'
+import { docJsonToMarkdown } from '../lib/markdown'
 
 const SECTION_LABELS = { today: '今日', week: '本周', month: '本月' }
 
@@ -62,7 +61,7 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
       if (error) setInviteErr('邀请名单加载失败，请稍后重试。')
       else setAllowed(data || [])
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   async function addEmail() {
@@ -156,36 +155,6 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
     }
   }
 
-  // 数据导入：选一个 .md 文件 → 解析成块 → **追加**到收集箱（非破坏性，绝不覆盖既有内容）。
-  // 故意只往收集箱加：导入后你在收集箱里再把内容搬去今日/本周。整篇覆盖式「恢复」太危险、不做。
-  const [importing, setImporting] = useState(false)
-  const [importMsg, setImportMsg] = useState('')
-  const fileRef = useRef(null)
-  async function importMarkdown(file) {
-    if (!file) return
-    setImporting(true)
-    setImportMsg('')
-    try {
-      const text = await file.text()
-      const imported = markdownToDocJson(text)
-      const blocks = (imported && Array.isArray(imported.content)) ? imported.content : []
-      if (!blocks.length) { setImportMsg('这个文件没解析出内容'); return }
-      // 读当前收集箱、把导入的块接在后面（不动原有的）
-      const cur = await loadDocResilient(me.id, 'stash', 'stash')
-      const curContent = (cur && Array.isArray(cur.content)) ? cur.content : []
-      const merged = { type: 'doc', content: [...curContent, ...blocks] }
-      await saveDocResilient({ owner: me.id, section: 'stash', periodKey: 'stash', json: merged, text: docJsonToText(merged) })
-      setImportMsg(`已导入 ${blocks.length} 块到收集箱 ✓ 去收集箱看`)
-      setTimeout(() => setImportMsg(''), 4000)
-    } catch (e) {
-      console.error('导入失败', e)
-      setImportMsg('导入失败了，文件可能不是 Markdown')
-    } finally {
-      setImporting(false)
-      if (fileRef.current) fileRef.current.value = ''
-    }
-  }
-
   // 设置页主体：桌面模态框和手机整页共用
   const body = (
     <>
@@ -193,7 +162,7 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
 
         {/* 个人信息 */}
         <div className="mt-4">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-stone-300 max-md:text-[12.5px]">个人信息</div>
+          <div className="text-[11px] font-medium uppercase tracking-wide text-stone-500 max-md:text-[12.5px]">个人信息</div>
           <label className="mt-2 block text-xs text-stone-500 max-md:text-[13px]">
             名字（显示用它，@你 也用它；改完自动保存）
             <span className="relative block">
@@ -242,7 +211,7 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
 
         {/* 成员 */}
         <div className="mt-5 border-t border-stone-100 pt-4">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-stone-300 max-md:text-[12.5px]">成员</div>
+          <div className="text-[11px] font-medium uppercase tracking-wide text-stone-500 max-md:text-[12.5px]">成员</div>
           <button
             onClick={copyFixedInvite}
             className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md bg-[var(--btn-bg)] px-3 py-2 text-[13px] text-[var(--btn-fg)] hover:bg-[var(--btn-bg-hover)] max-md:text-[14.5px]"
@@ -255,7 +224,7 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
               {inviteLink}
             </div>
           )}
-          <p className="mt-1 text-[11px] text-stone-300 max-md:text-[12.5px]">
+          <p className="mt-1 text-[11px] text-stone-500 max-md:text-[12.5px]">
             把这个链接发给谁，对方打开就能用邀请码注册进来，无需审批。
           </p>
           {(() => {
@@ -283,7 +252,7 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
                         <span className="flex items-center gap-1.5 text-stone-300">
                           {p.email}
                           {p.email && (
-                            <button onClick={() => copyInviteLink(p.email)} title="复制邀请链接" className="text-stone-300 hover:text-stone-600">
+                            <button onClick={() => copyInviteLink(p.email)} title="复制邀请链接" aria-label="复制邀请链接" className="text-stone-300 hover:text-stone-600">
                               {copiedEmail === p.email ? <Check size={11} className="text-emerald-500" /> : <Link2 size={11} />}
                             </button>
                           )}
@@ -295,10 +264,10 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
                         <span className="text-amber-400">已邀请 · 未加入</span>
                         <span className="flex items-center gap-1.5 text-amber-700">
                           {a.email}
-                          <button onClick={() => copyInviteLink(a.email)} title="复制邀请链接" className="text-stone-300 hover:text-stone-600">
+                          <button onClick={() => copyInviteLink(a.email)} title="复制邀请链接" aria-label="复制邀请链接" className="text-stone-300 hover:text-stone-600">
                             {copiedEmail === a.email ? <Check size={11} className="text-emerald-500" /> : <Link2 size={11} />}
                           </button>
-                          <button onClick={() => removeEmail(a.email)} title="移出名单" className="text-stone-300 hover:text-red-500">
+                          <button onClick={() => removeEmail(a.email)} title="移出名单" aria-label="移出名单" className="text-stone-300 hover:text-red-500">
                             <X size={11} />
                           </button>
                         </span>
@@ -313,15 +282,10 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
 
         {/* 数据与账号 */}
         <div className="mt-5 border-t border-stone-100 pt-4">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-stone-300 max-md:text-[12.5px]">数据与账号</div>
+          <div className="text-[11px] font-medium uppercase tracking-wide text-stone-500 max-md:text-[12.5px]">数据与账号</div>
           <button onClick={exportData} disabled={exporting} className="mt-2 flex items-center gap-1.5 text-[13px] text-stone-500 hover:text-stone-700 disabled:opacity-50 max-md:text-[15px]">
             <Download size={13} /> {exporting ? '导出中…' : '导出我的数据（Markdown）'}
           </button>
-          <input ref={fileRef} type="file" accept=".md,.markdown,text/markdown,text/plain" className="hidden" onChange={(e) => importMarkdown(e.target.files?.[0])} />
-          <button onClick={() => fileRef.current?.click()} disabled={importing} className="mt-2 flex items-center gap-1.5 text-[13px] text-stone-500 hover:text-stone-700 disabled:opacity-50 max-md:text-[15px]">
-            <Upload size={13} /> {importing ? '导入中…' : '导入 Markdown（进收集箱）'}
-          </button>
-          {importMsg && <p className={'mt-1 text-xs ' + (importMsg.includes('✓') ? 'text-emerald-600' : 'text-red-500')}>{importMsg}</p>}
           <button
             onClick={() => supabase.auth.signOut()}
             className="mt-2 flex items-center gap-1.5 text-[13px] text-red-500 hover:text-red-700 max-md:text-[15px]"

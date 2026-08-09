@@ -43,12 +43,17 @@ grant select on public.docs_visible to authenticated, anon;
 
 
 -- ========================= STEP 2（app 部署后再跑）=========================
+-- 2026-08-09：这两条在生产上是手动跑过的（已用 pg_policies 核实：docs 与
+-- doc_revisions 的 SELECT qual 都是 owner = auth.uid()）。但它们在本文件里一直是
+-- 注释状态，等于「生产靠的是一次没有留痕的手工操作」——照 README 从头装一套新库，
+-- 装出来的是隐私完全没生效的版本，而 DocEditor.jsx 里的 PRIVACY_ENABLED 是 true。
+-- 现在改成可执行。两条都是 drop-then-create，对已经跑过的库重复执行也是安全的。
 -- 把 docs 原表 SELECT 锁成 owner-only：别人无法直接读到全文 doc_json，只能走 docs_visible 拿 public 投影。
 -- （写策略 insert/update/delete 不变，仍 owner-only。app 读已改走 docs_visible，所以这步不会让谁读不到。）
 
--- drop policy if exists docs_select on docs;
--- create policy docs_select on docs for select to authenticated using (owner = auth.uid());
+drop policy if exists docs_select on docs;
+create policy docs_select on docs for select to authenticated using (owner = auth.uid());
 
 -- 版本历史也锁 owner-only：全文快照只有本人能看，私密内容不从历史泄露。
--- drop policy if exists doc_revisions_read on doc_revisions;
--- create policy doc_revisions_read on doc_revisions for select to authenticated using (owner = auth.uid());
+drop policy if exists doc_revisions_read on doc_revisions;
+create policy doc_revisions_read on doc_revisions for select to authenticated using (owner = auth.uid());

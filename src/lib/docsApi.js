@@ -23,12 +23,80 @@ export async function loadDoc(owner, section, periodKey, tagId = null) {
   return data?.doc_json ?? null
 }
 
+/**
+ * 和 loadDoc 一样，但把 updated_at 一起带出来。
+ *
+ * updated_at 是"我这份是基于哪一版改的"的凭据 —— saveDoc 拿它做前置条件，
+ * 就不会用一份过期的内容整篇盖掉别的设备刚写的东西。
+ * 之前 loadDoc 其实已经 select 了这一列，然后丢掉了。
+ */
+export async function loadDocWithMeta(owner, section, periodKey, tagId = null) {
+  const query = supabase
+    .from('docs_visible')
+    .select('doc_json, updated_at')
+    .eq('owner', owner)
+    .eq('section', section)
+    .eq('period_key', periodKey)
+
+  const { data, error } = await byTag(query, tagId).maybeSingle()
+  if (error) throw error
+  return { json: data?.doc_json ?? null, updatedAt: data?.updated_at ?? null }
+}
+
+/** saveDoc 检测到"我基于的版本已经不是最新"时抛这个，调用方不能当普通失败处理。 */
+export class DocConflictError extends Error {
+  constructor(serverUpdatedAt) {
+    super('doc changed on the server since it was loaded')
+    this.name = 'DocConflictError'
+    this.serverUpdatedAt = serverUpdatedAt
+  }
+}
+
 // upsert 自己的文档（RLS：owner 必须 = auth.uid()）。空文档也存，保持"今天那篇"存在。
 // 同时存一份「剥掉私密块」的 public 投影（doc_json_public/doc_text_public）——别人只能读到这份。
 // 落库后顺带同步 @提及索引（doc_mentions）：用 public 投影做，私密块里的 @ 不通知别人、不进搜索。
-export async function saveDoc({ owner, section, periodKey, tagId = null, json, text }) {
+export async function saveDoc({ owner, section, periodKey, tagId = null, json, text, expectedUpdatedAt }) {
   const publicJson = stripPrivate(json)
   const publicText = docText(publicJson)
+
+  // 有前置条件时走带条件的 update：只有当库里那一版还是我加载的那一版才写得进去。
+  // 这一步是为了堵住一类静默丢内容：另一台设备（或另一个标签页）在这中间写过，
+  // 而我手上是一份过期的整篇 JSON —— 无条件 upsert 会把人家写的直接抹掉。
+  if (expectedUpdatedAt) {
+    const stamp = new Date().toISOString()
+    const update = supabase
+      .from('docs')
+      .update({
+        doc_json: json,
+        doc_text: text ?? '',
+        doc_json_public: publicJson,
+        doc_text_public: publicText,
+        updated_at: stamp,
+      })
+      .eq('owner', owner)
+      .eq('section', section)
+      .eq('period_key', periodKey)
+      .eq('updated_at', expectedUpdatedAt)
+
+    // ⚠️ 必须把 updated_at 一起读回来，**不能返回上面那个 stamp**。
+    // docs 上有个 BEFORE UPDATE 触发器 docs_touch：`new.updated_at = now()` ——
+    // 它会无条件覆盖客户端传上来的值，而且 now() 是微秒精度、JS 的 toISOString() 只有毫秒，
+    // 所以两者永远不相等。返回 stamp 的话，下一次保存拿它当前置条件会匹配 0 行，
+    // 于是每一篇文档从第二次保存起都会误报"冲突"。
+    const { data: rows, error: updateError } = await byTag(update, tagId).select('id, updated_at')
+    if (updateError) throw updateError
+    if (rows && rows.length > 0) {
+      const id = rows[0].id
+      if (id) syncDocMentions(id, owner, publicJson).catch(() => {})
+      return { id, updatedAt: rows[0].updated_at }
+    }
+    // 一行都没更新：要么这份文档还不存在（第一次存），要么它被别人改过。
+    const current = await loadDocWithMeta(owner, section, periodKey, tagId)
+    if (current.updatedAt) throw new DocConflictError(current.updatedAt)
+    // 不存在 → 落到下面的 upsert 建它
+  }
+
+  const stamp = new Date().toISOString()
   const { data, error } = await supabase
     .from('docs')
     .upsert(
@@ -41,15 +109,16 @@ export async function saveDoc({ owner, section, periodKey, tagId = null, json, t
         doc_text: text ?? '',
         doc_json_public: publicJson,
         doc_text_public: publicText,
-        updated_at: new Date().toISOString(),
+        updated_at: stamp,
       },
       { onConflict: 'owner,section,period_key,tag_id' },
     )
-    .select('id')
+    .select('id, updated_at')
     .single()
   if (error) throw error
   if (data?.id) syncDocMentions(data.id, owner, publicJson).catch(() => {}) // 私密块的 @ 不外发；表没建好也不挡存
-  return data?.id
+  // 同上：upsert 命中已有行时也会走 docs_touch，存进去的不是 stamp。以库里的为准。
+  return { id: data?.id, updatedAt: data?.updated_at ?? stamp }
 }
 
 // 取一个块的纯文本（@提及计为「@label」），并把每个 @ 节点的 {id, mid} 收进 items
@@ -60,6 +129,8 @@ function blockText(node, items) {
     if (node.attrs?.id) items.push({ id: node.attrs.id, mid: node.attrs.mid || null })
     return '@' + (node.attrs?.label || '')
   }
+  // dateStamp 是 atom，文字在 attrs.label 里而不是子节点，不写这一条就搜不到日期。
+  if (node.type === 'dateStamp') return node.attrs?.label || ''
   if (Array.isArray(node.content)) return node.content.map((c) => blockText(c, items)).join('')
   return ''
 }
@@ -155,12 +226,40 @@ export async function searchDocs(query) {
 export async function listPeriods(owner, section, tagId = null) {
   const query = supabase
     .from('docs_visible')
-    .select('period_key, tag_id, doc_text, updated_at')
+    // 只要 period_key —— 调用方（DocTimeline）也只用这一个字段。
+    // 原来连 doc_text 一起拉：为了渲染一列日期标题，把这个人所有文档的全文都下载了一遍。
+    // limit 是为了让"用了一年"和"用了一周"的人打开速度不会差一个数量级。
+    .select('period_key')
     .eq('owner', owner)
     .eq('section', section)
 
   const { data, error } = await byTag(query, tagId)
     .order('period_key', { ascending: false })
+    .limit(200)
   if (error) throw error
   return data ?? []
+}
+
+/**
+ * 每个人最近一次写东西的时间 —— 给侧边栏"有新动态"红点用。
+ *
+ * 这个红点在 entries 模型下线之后就一直是灭的：它读的 allEntries 恒为空数组。
+ * 也就是说，一个用户能看见的功能**悄悄停止工作了很久**，而界面看起来一切正常。
+ *
+ * 走 docs_visible，所以别人的文档拿到的是剥掉私密块的公开投影 ——
+ * "这个人有新内容"这件事本来就体现在时间线上，这里不额外泄露任何东西。
+ * 取最近 200 条足够判断"谁最近写过"，不必扫全表。
+ */
+export async function loadRecentActivity() {
+  const { data, error } = await supabase
+    .from('docs_visible')
+    .select('owner, updated_at')
+    .order('updated_at', { ascending: false })
+    .limit(200)
+  if (error) return {}
+  const latest = {}
+  for (const r of data ?? []) {
+    if (!latest[r.owner] || r.updated_at > latest[r.owner]) latest[r.owner] = r.updated_at
+  }
+  return latest
 }

@@ -174,11 +174,24 @@ textarea:focus-visible,
 select:focus-visible {
   outline: none;
 }
-/* 按钮/链接不画聚焦框（海涛：键盘焦点落到按钮上会突然冒一圈蓝边，很突兀）。表单输入框仍保留焦点框。*/
-button:focus,
+
+/* 键盘导航才出现，鼠标点击不出现。 */
 button:focus-visible,
 a:focus-visible,
 [role='button']:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--ink-muted);
+  border-radius: 4px;
+}
+/* 按钮/链接不画聚焦框（海涛：键盘焦点落到按钮上会突然冒一圈蓝边，很突兀）。表单输入框仍保留焦点框。
+   —— 你要去掉的是"鼠标点一下就冒一圈蓝边"，那是 :focus 干的。
+   但原来连 :focus-visible 一起关掉了，而 :focus-visible 只在**键盘**导航时才触发：
+   结果是纯键盘用户完全看不出焦点在哪，整个产品没有一处可见焦点（WCAG 2.4.7）。
+   现在：鼠标点击依然不冒框（你要的），键盘 Tab 时给一圈很淡的提示（够用就行）。
+   如果这圈还是碍眼，把下面 :focus-visible 那条删掉即可。 */
+button:focus,
+a:focus,
+[role='button']:focus {
   outline: none;
 }
 /* 注册页「Hi @名字」是下划线输入框，不画焦点框 */
@@ -258,4 +271,15 @@ a:focus-visible,
 }
 .float-in {
   animation: float-in 0.45s ease-out both;
+}
+
+/* Tailwind v4 起，preflight 不再给 <button> 设 cursor: pointer（v3 是给的）。
+   于是全站 81 个按钮里有 76 个鼠标停上去还是箭头，看着都像不可点。
+   海涛是在换头像时发现的，但这是全局问题，所以在全局修。
+   :disabled 排除掉 —— 不可点的东西不该显示成可点。 */
+button:not(:disabled),
+[role='button']:not(:disabled),
+label[for],
+summary {
+  cursor: pointer;
 }

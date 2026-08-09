@@ -15,14 +15,26 @@ function snippet(text, q) {
 // docs 全文搜索结果：搜 doc_text，点一条跳到那个人那个频道
 export default function DocSearch({ query, profiles, onJump }) {
   const [hits, setHits] = useState(null)
+  // 防抖 + 至少两个字符再查。
+  // 之前是每敲一个键就发一次请求，而每次请求都是对 docs_visible 做 ilike '%q%'
+  // ——那一列是 CASE 表达式，索引用不上，必然全表扫。打「会议」= 2 次全表扫，
+  // 打一个英文单词 = 5 次以上。单字符查询还几乎匹配所有文档。
   useEffect(() => {
     let alive = true
+    const q = (query || '').trim()
+    // 长度门槛只拦 ASCII：拉丁字母 1 个字符没有检索意义，但**一个汉字就是一个词**
+    // （"茶"、人名单字都是完整查询）—— 一刀切 <2 会让中文单字搜索永远"无结果"。
+    const isAsciiOnly = /^[\x00-\x7f]*$/.test(q)
+    if (q.length < (isAsciiOnly ? 2 : 1)) { setHits([]); return () => { alive = false } }
     setHits(null)
-    searchDocs(query)
-      .then((r) => alive && setHits(r))
-      .catch(() => alive && setHits([]))
+    const timer = setTimeout(() => {
+      searchDocs(q)
+        .then((r) => alive && setHits(r))
+        .catch(() => alive && setHits([]))
+    }, 250)
     return () => {
       alive = false
+      clearTimeout(timer)
     }
   }, [query])
 

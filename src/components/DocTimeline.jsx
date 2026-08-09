@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { periodHeader } from '../lib/period'
 import { periodHeaderFromKey, periodKey } from '../lib/periodKey'
 import { listPeriods, moveBlockToToday } from '../lib/docsApi'
+import { forgetDocCacheFor } from '../lib/resilientDocs'
 import DocBlock from './DocBlock'
 
 const PERIOD_CACHE_PREFIX = 'nownow_periodcache:'
@@ -33,7 +34,7 @@ function setCachedPeriodKeys(owner, section, tagId = null, keys) {
 
 // 一个频道的文档时间线：当前周期可写（占首屏）、过去有内容的周期只读、往下回溯。
 // owner=正在看谁的页；section=今日/本周/本月/收集箱；isMyPage=能不能写。
-export default function DocTimeline({ owner, section, tagId = null, isMyPage, baseDate, viewportH, profiles, mentionFreq, mentionStates, flashKey, refreshNonce = 0 }) {
+export default function DocTimeline({ owner, section, tagId = null, isMyPage, baseDate, viewportH, profiles, mentionFreq, flashKey, refreshNonce = 0 }) {
   const curKey = periodKey(section, 0, baseDate)
   const tagKey = tagId || 'default'
   const [pastKeys, setPastKeys] = useState([])
@@ -43,7 +44,7 @@ export default function DocTimeline({ owner, section, tagId = null, isMyPage, ba
   const [reloadNonce, setReloadNonce] = useState(0) // 搬块后 bump → 当前块+过去块重挂、读已更新缓存
   const refreshRef = useRef(refreshNonce)
 
-  // 搬块后刷新：重拉 pastKeys（源块搬空了会消失）+ 重挂块显示新内容（moveBlockToToday 已更新缓存）
+  // 搬块后刷新：重拉 pastKeys（源块搬空了会消失）+ 重挂块显示新内容（缓存由 carry 里显式作废）
   const refresh = useCallback(() => {
     const scope = currentPastKeysScope
     listPeriods(owner, section, tagId)
@@ -61,7 +62,14 @@ export default function DocTimeline({ owner, section, tagId = null, isMyPage, ba
   const carry = useCallback(
     (fromPeriod, blockIndex) => {
       moveBlockToToday({ owner, fromSection: section, fromPeriod, fromTagId: tagId, blockIndex, toSection: section, toPeriod: curKey, toTagId: tagId })
-        .then(() => refresh())
+        .then(() => {
+          // 两边的读缓存都要作废 —— moveBlockToToday 直接写库，压根不认识这个缓存。
+          // 不清的话：屏幕上看起来"什么都没发生"（两边都还是旧缓存），
+          // 而用户再去编辑那个"还在原地"的块，会把它整篇写回去，变成一块内容两份。
+          forgetDocCacheFor(owner, section, fromPeriod, tagId)
+          forgetDocCacheFor(owner, section, curKey, tagId)
+          refresh()
+        })
         .catch((e) => {
           console.error('搬到今天失败', e)
           alert('搬动失败了，可能内容刚被改过——刷新一下再试。')
@@ -106,7 +114,7 @@ export default function DocTimeline({ owner, section, tagId = null, isMyPage, ba
   if (section === 'stash') {
     return (
       <div id="doc-stash-stash" className={'pt-1' + (flashKey === 'stash' ? ' doc-flash' : '')}>
-        <DocBlock key={`stash-${owner}-${tagKey}`} owner={owner} section="stash" periodKey="stash" tagId={tagId} editable={isMyPage} placeholder="写点什么…" profiles={profiles} mentionFreq={mentionFreq} mentionStates={mentionStates} fill />
+        <DocBlock key={`stash-${owner}-${tagKey}`} owner={owner} section="stash" periodKey="stash" tagId={tagId} editable={isMyPage} placeholder="写点什么…" profiles={profiles} mentionFreq={mentionFreq} fill />
       </div>
     )
   }
@@ -120,7 +128,7 @@ export default function DocTimeline({ owner, section, tagId = null, isMyPage, ba
           <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: 'var(--accent)' }} aria-hidden />
           {periodHeader(section, 0, baseDate)}
         </div>
-        <DocBlock key={`${owner}-${section}-${curKey}-${tagKey}-${reloadNonce}`} owner={owner} section={section} periodKey={curKey} tagId={tagId} editable={isMyPage} placeholder="写点什么…" profiles={profiles} mentionFreq={mentionFreq} mentionStates={mentionStates} fill />
+        <DocBlock key={`${owner}-${section}-${curKey}-${tagKey}-${reloadNonce}`} owner={owner} section={section} periodKey={curKey} tagId={tagId} editable={isMyPage} placeholder="写点什么…" profiles={profiles} mentionFreq={mentionFreq} fill />
       </div>
       {/* 过去：只读，往下回溯 */}
       {pastKeysInScope.map((k) => (
@@ -140,7 +148,7 @@ export default function DocTimeline({ owner, section, tagId = null, isMyPage, ba
             placeholder="写点什么…"
             profiles={profiles}
             mentionFreq={mentionFreq}
-            mentionStates={mentionStates}
+           
             onCarry={isMyPage && section === 'today' ? (blockIndex) => carry(k, blockIndex) : undefined}
           />
         </div>

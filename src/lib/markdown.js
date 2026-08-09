@@ -1,6 +1,8 @@
 // Tiptap 文档 JSON ⇆ Markdown：用现成的 tiptap-markdown。
 // 用一个无界面（headless）的 Editor 做转换器，扩展集对齐 DocEditor 的节点类型，保证导出保真。
-// 给设置里的「导出我的数据（Markdown）」+ 将来导入用。
+// 给设置里的「导出我的数据（Markdown）」用。
+// markdownToDocJson 目前没有调用方 —— 导入功能已从设置里撤掉，函数留着，
+// 想恢复导入时不用重写解析器（未被引用，不会打进产物）。
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import Highlight from '@tiptap/extension-highlight'
@@ -17,6 +19,7 @@ import { Color } from '@tiptap/extension-color'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { createLowlight, common } from 'lowlight'
 import { Callout } from '../components/Callout'
+import { DateStamp } from '../components/DateStamp'
 import { PrivateBlock } from './privateBlock'
 import { Markdown } from 'tiptap-markdown'
 
@@ -41,6 +44,7 @@ function converter() {
         TableCell,
         Mention,
         Callout,
+        DateStamp,
         PrivateBlock,
         Markdown,
       ],
