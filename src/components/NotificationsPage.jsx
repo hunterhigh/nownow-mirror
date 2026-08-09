@@ -1,8 +1,18 @@
 import { useEffect, useState } from 'react'
-import { AtSign, Bell, CheckCircle2, Square, UserPlus, X } from 'lucide-react'
+import { AtSign, Bell, CheckCircle2, MessageSquarePlus, Square, Trash2, UserPlus, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { loadMyMentions, markMentionRead, dismissMention, completeMention, loadMyCompletions, ackCompletion } from '../lib/docMentionsApi'
 import { periodHeaderFromKey } from '../lib/periodKey'
+import { listFeedback, submitFeedback, deleteFeedback } from '../lib/feedbackApi'
+
+
+// 反馈卡片的时间：参考飞书 memo 的样式（2026-06-11 10:21）。
+function fmtFeedbackTime(iso) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
 
 const SECTION_LABELS = { today: '今日', week: '本周', month: '本月', stash: '收集箱' }
 
@@ -68,6 +78,49 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
       return
     }
     onMembersChanged?.()
+  }
+
+  // ---- 反馈墙（v1）----
+  // 提交是乐观的：卡片先出现（临时 id），服务器确认后换成真 id；失败则移除并把
+  // 内容放回输入框 —— 用户敲的字永远不丢。
+  const [feedback, setFeedback] = useState([])
+  const [feedbackDraft, setFeedbackDraft] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    listFeedback().then((r) => { if (alive) setFeedback(r) }).catch(() => {})
+    return () => { alive = false }
+  }, [me?.id])
+
+  async function sendFeedback() {
+    const content = feedbackDraft.trim()
+    if (!content || submitting) return
+    setSubmitting(true)
+    setOperationError('')
+    const temp = { id: `temp-${Math.random()}`, author: me?.id, content, created_at: new Date().toISOString() }
+    setFeedback((xs) => [temp, ...xs])
+    setFeedbackDraft('')
+    try {
+      const saved = await submitFeedback(content)
+      setFeedback((xs) => xs.map((x) => (x.id === temp.id ? saved : x)))
+    } catch {
+      setFeedback((xs) => xs.filter((x) => x.id !== temp.id))
+      setFeedbackDraft(content) // 字放回输入框，不丢
+      setOperationError('反馈提交失败，请重试。')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  function removeFeedback(f) {
+    setOperationError('')
+    const prev = feedback
+    setFeedback((xs) => xs.filter((x) => x.id !== f.id))
+    deleteFeedback(f.id).catch(() => {
+      setFeedback(prev)
+      setOperationError('删除反馈失败，请重试。')
+    })
   }
 
   function openMention(m) {
@@ -164,9 +217,57 @@ export default function NotificationsPage({ me, pendingMembers = [], profiles, o
 
       {operationError && <p className="mb-3 text-sm text-red-600">{operationError}</p>}
 
+      {/* 反馈墙 v1：输入框 + 卡片流（参考飞书 memo）。使用感受 / bug / 改进建议，全员可见。 */}
+      <div className="rounded-lg border border-stone-200/80 bg-[var(--surface-elevated)] p-3">
+        <textarea
+          value={feedbackDraft}
+          onChange={(e) => setFeedbackDraft(e.target.value)}
+          onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') sendFeedback() }}
+          placeholder="使用感受、bug、想要的功能……都可以写在这里"
+          rows={2}
+          maxLength={2000}
+          className="w-full resize-none bg-transparent text-[13.5px] leading-relaxed outline-none placeholder:text-stone-300 max-md:text-[15px]"
+        />
+        <div className="mt-1 flex items-center">
+          <span className="text-[11px] text-stone-300">⌘+Enter 也可以提交</span>
+          <button
+            onClick={sendFeedback}
+            disabled={submitting || !feedbackDraft.trim()}
+            className="ml-auto flex h-7 items-center gap-1 rounded-full bg-[var(--nav-soft)] px-3 text-[13px] text-stone-600 transition-colors hover:text-stone-900 disabled:opacity-40"
+          >
+            <MessageSquarePlus size={14} /> {submitting ? '提交中…' : '提交反馈'}
+          </button>
+        </div>
+      </div>
+
+      {feedback.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {feedback.map((f) => {
+            const who = profiles?.find((p) => p.id === f.author)?.display_name || '有人'
+            const isMine = f.author === me?.id
+            return (
+              <div key={f.id} className="rounded-lg border border-stone-200/60 bg-[var(--surface-elevated)] px-4 py-3">
+                <div className="flex items-center text-[11.5px]" style={{ color: 'var(--ink-faint)' }}>
+                  <span>{fmtFeedbackTime(f.created_at)} · {who}</span>
+                  {isMine && (
+                    <button onClick={() => removeFeedback(f)} title="删除这条反馈" aria-label="删除这条反馈" className="ml-auto text-stone-300 hover:text-red-500">
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+                {/* whitespace-pre-wrap：反馈常有分点/换行，压成一行会没法读 */}
+                <div className="mt-1.5 whitespace-pre-wrap text-[13.5px] leading-relaxed max-md:text-[15px]" style={{ color: 'var(--ink)' }}>
+                  {f.content}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {empty && (
         <p className="mt-6 text-sm text-stone-300 max-md:text-[15px]">
-          没有新通知。别人 @ 你派活、对方完成、申请加入的成员，都会出现在这里。
+          没有新通知。别人 @ 你、对方完成你 @ 的事、申请加入的成员，都会出现在这里。
         </p>
       )}
 
