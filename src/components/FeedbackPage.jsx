@@ -102,7 +102,7 @@ export default function FeedbackPage({ me, profiles }) {
           const who = profiles?.find((p) => p.id === f.author)?.display_name || '有人'
           const isMine = f.author === me?.id
           return (
-            <div key={f.id} className="rounded-lg border border-stone-200/60 bg-[var(--surface-elevated)] px-4 py-3">
+            <div key={f.id} className="rounded-lg border border-stone-200/60 bg-white px-4 py-3 shadow-sm">
               <div className="flex items-center text-[11.5px]" style={{ color: 'var(--ink-faint)' }}>
                 <span>{fmtTime(f.created_at)} · {who}</span>
                 {isMine && (
