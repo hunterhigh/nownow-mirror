@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ChevronDown, Inbox as InboxIcon, CheckCircle2, Square, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { loadMyMentions, markMentionRead, completeMention, loadMyCompletions, ackCompletion } from '../lib/docMentionsApi'
+import { dismissMention as dismissMentionRpc, loadMyMentions, markMentionRead, completeMention, loadMyCompletions, ackCompletion } from '../lib/docMentionsApi'
 import { periodHeaderFromKey } from '../lib/periodKey'
 
 const SECTION_LABELS = { today: '今日', week: '本周', month: '本月', stash: '收集箱' }
@@ -85,7 +85,11 @@ export default function Inbox({ me, profiles, onJumpDoc, scope = null }) {
 
   async function dismissMention(m) {
     try {
-      await markMentionRead(m.id)
+      // 以前这里调的是 markMentionRead —— 函数名叫 dismiss、实际只标已读。
+      // 而红点数的是"没完成的派活"（Board.jsx 的 pendingAt，读没读都算），
+      // 所以点掉整条 @我的 窄条之后，铃铛上的数字**永远不会消**。
+      // 现在真的忽略：从我的列表移走，且不通知派活的人。
+      await dismissMentionRpc(m.id)
       setItems((xs) => xs.filter((x) => x.id !== m.id))
       cachedItems = cachedItems.filter((x) => x.id !== m.id)
     } catch {
@@ -121,7 +125,7 @@ export default function Inbox({ me, profiles, onJumpDoc, scope = null }) {
                 <button
                   type="button"
                   onClick={() => complete(m)}
-                  title="标记完成"
+                  title="标记完成" aria-label="标记完成"
                   className="mt-0.5 shrink-0 text-stone-400 transition-colors hover:text-[var(--accent)]"
                 >
                   <Square size={16} />
@@ -141,7 +145,7 @@ export default function Inbox({ me, profiles, onJumpDoc, scope = null }) {
                     </div>
                   )}
                 </button>
-                <button onClick={() => dismissMention(m)} title="删除这条通知" className="mt-0.5 shrink-0 text-stone-400 hover:text-stone-600">
+                <button onClick={() => dismissMention(m)} title="删除这条通知" aria-label="删除这条通知" className="mt-0.5 shrink-0 text-stone-400 hover:text-stone-600">
                   <X size={14} />
                 </button>
               </div>
@@ -171,7 +175,7 @@ export default function Inbox({ me, profiles, onJumpDoc, scope = null }) {
                     <b style={{ color: 'var(--ink-muted)' }}>{who}</b> 完成了你派的 · {ctx}
                   </div>
                 </div>
-                <button onClick={() => dismissDone(c)} title="知道了" className="mt-0.5 shrink-0 text-stone-400 hover:text-stone-600">
+                <button onClick={() => dismissDone(c)} title="知道了" aria-label="知道了" className="mt-0.5 shrink-0 text-stone-400 hover:text-stone-600">
                   <X size={14} />
                 </button>
               </div>

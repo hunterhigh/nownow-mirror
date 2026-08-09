@@ -15,8 +15,11 @@ export async function loadMyMentions() {
   const { data, error } = await supabase
     .from('doc_mentions')
     .select('id, doc_id, author, created_at, read_at, completed_at, snippet, docs_visible!inner(owner, section, period_key, tag_id)')
+    // 被我"忽略"的不再出现在通知里。忽略 ≠ 完成：派活的人不会收到任何完成通知。
+    .is('dismissed_at', null)
     .eq('mentioned', user.id)
     .order('created_at', { ascending: false })
+    .limit(200)
   if (error) throw error
   return (data ?? []).map((m) => ({
     id: m.id,
@@ -94,6 +97,9 @@ export async function loadMyMentionStates() {
     .from('doc_mentions')
     .select('mention_id, completed_at')
     .eq('author', user.id)
+    // 无上限地扫"我发出过的所有 @"，而每有人打一个 @ 全场 80 个客户端都会重跑一次。
+    .order('created_at', { ascending: false })
+    .limit(500)
   if (error) return {}
   const map = {}
   for (const r of data ?? []) map[r.mention_id] = r.completed_at != null
@@ -112,8 +118,17 @@ export async function loadMentionFrequency() {
     .from('doc_mentions')
     .select('mentioned')
     .eq('author', user.id)
+    // 只是为了给 @ 选择框排个序，最近 500 条足够代表"我常 @ 谁"。
+    .order('created_at', { ascending: false })
+    .limit(500)
   if (error) return {}
   const freq = {}
   for (const r of data ?? []) freq[r.mentioned] = (freq[r.mentioned] || 0) + 1
   return freq
+}
+
+/** 忽略一条派给我的活：从我的通知里移走，但**不**告诉派活的人"我做完了"。 */
+export async function dismissMention(id) {
+  const { error } = await supabase.rpc('dismiss_mention', { p_id: id })
+  if (error) throw error
 }
