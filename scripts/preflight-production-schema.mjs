@@ -17,6 +17,28 @@ if (!anonKey) {
   fail('Missing VITE_SUPABASE_ANON_KEY. Load .env.production or .env.local before running the preflight.')
 }
 
+// 自定义头像（migration-036）：前端一旦有 uploadAvatar，生产库就必须先有 avatars 桶，
+// 否则上线后**每个人**点「+」都失败，而且前端只会说"上传失败，换张图试试"——
+// 用户会以为是自己的图有问题，你要等有人来投诉才知道。顺序必须是先迁移、再部署。
+//
+// 这一组要在 doc-tags 的早退**之前**判断：那段 exit(0) 会让后面的探针一条都不跑。
+const avatarProbes = sourceRequiresAvatarBucket()
+  ? [storageBucketProbe('avatars 存桶（migration-036）', 'avatars')]
+  : []
+
+if (avatarProbes.length > 0) {
+  const avatarResults = await Promise.all(avatarProbes.map((probe) => probe()))
+  const avatarFailures = avatarResults.filter((r) => !r.ok)
+  if (avatarFailures.length > 0) {
+    console.error(`[schema-preflight] ${hostname(targetUrl)} 缺少当前前端需要的存储配置：`)
+    for (const f of avatarFailures) console.error(`- ${f.name}: ${f.reason}`)
+    console.error('')
+    console.error('先跑 supabase/migration-036-custom-avatar.sql，再部署前端。')
+    process.exit(1)
+  }
+  console.log('[schema-preflight] avatars 存桶就绪。')
+}
+
 if (!sourceRequiresDocTags()) {
   console.log('[schema-preflight] Current frontend does not require document tag schema; skipping tag probes.')
   process.exit(0)
@@ -65,6 +87,34 @@ function hostname(value) {
 function fail(message) {
   console.error(`[schema-preflight] ${message}`)
   process.exit(1)
+}
+
+/** 前端是否已经带上传头像的能力（带了就必须有桶）。 */
+function sourceRequiresAvatarBucket() {
+  const file = 'src/lib/storage.js'
+  if (!existsSync(file)) return false
+  return /uploadAvatar/.test(readFileSync(file, 'utf8'))
+}
+
+/**
+ * 桶存在性探针：拿一个必然不存在的对象去问。
+ *   桶不在 → NoSuchBucket（400）      这是我们要拦的
+ *   桶在   → NoSuchKey / 404          说明桶已就绪
+ * 用公开下载端点，不需要任何权限，也不会写入任何东西。
+ */
+function storageBucketProbe(name, bucket) {
+  return async () => {
+    try {
+      const res = await fetch(`${targetUrl}/storage/v1/object/public/${bucket}/__preflight__/none.webp`, requestOptions({}))
+      const body = await res.text()
+      if (/NoSuchBucket|Bucket not found/i.test(body)) {
+        return { name, ok: false, reason: '桶不存在 —— migration-036 还没在这个库上跑过' }
+      }
+      return { name, ok: true }
+    } catch (error) {
+      return { name, ok: false, reason: error.message || String(error) }
+    }
+  }
 }
 
 function sourceRequiresDocTags() {

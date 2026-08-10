@@ -613,12 +613,15 @@ export default function Board({ session }) {
   const saveAvatar = useCallback(async (value, { throwOnError = false } = {}) => {
     const prev = me?.avatar ?? null
     setProfiles((xs) => xs.map((p) => (p.id === me?.id ? { ...p, avatar: value } : p)))
-    const { error } = await supabase.from('profiles').update({ avatar: value }).eq('id', me?.id)
-    if (!error) return
+    // .select() 不能省：RLS 把行过滤掉时 PostgREST 返回的是"成功 + 0 行"，
+    // 不带 select 就分辨不出"存好了"和"一行都没写"——界面会显示换好了、刷新后打回原形。
+    const { data, error } = await supabase.from('profiles').update({ avatar: value }).eq('id', me?.id).select('id')
+    if (!error && data?.length) return
     // 静默回退等于"点了没反应" —— 用户无从判断是没点中还是存失败了。
     setProfiles((xs) => xs.map((p) => (p.id === me?.id ? { ...p, avatar: prev } : p)))
-    report('avatar', error)
-    if (throwOnError) throw error // 上传路径：交给选择器就地显示，不弹 alert
+    const failure = error || new Error('avatar update affected 0 rows')
+    report('avatar', failure)
+    if (throwOnError) throw failure // 上传路径：交给选择器就地显示，不弹 alert
     alert('头像没保存上，稍后再试。')
   }, [me?.avatar, me?.id])
 

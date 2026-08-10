@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { customAvatarUrl } from '../lib/storage'
+import { report } from '../lib/report'
 
 // 可选头像。只存标识（'a1'…），图片是随前端发布的静态资源 —— 换设计改文件即可，
 // 不用动数据库里任何一行。
@@ -39,16 +40,19 @@ export default function AvatarPicker({ current, onPick, onClose, onUpload }) {
   // 所以同时存在两个 AvatarPicker。用 ref.contains 时，另一个实例会认为这次点击
   // 发生在"它的外面"，于是在 mousedown 阶段就把 avatarOpen 关掉 ——
   // 而 onClick 还没来得及触发。表现就是：点了头像，什么也没发生。
+  // 上传过程中不许关：关掉 = 组件卸载，失败提示就落在一个不存在的组件上，
+  // 而 Board 那边刻意不弹 alert（交给这里显示）——两下一凑就是彻底的静默失败：
+  // 用户以为换好了，实际什么也没发生。busy 期间锁住这两个出口。
   useEffect(() => {
-    const onDown = (e) => { if (!e.target?.closest?.('[data-avatar-picker]')) onClose?.() }
-    const onKey = (e) => { if (e.key === 'Escape') onClose?.() }
+    const onDown = (e) => { if (!busy && !e.target?.closest?.('[data-avatar-picker]')) onClose?.() }
+    const onKey = (e) => { if (!busy && e.key === 'Escape') onClose?.() }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
     }
-  }, [onClose])
+  }, [onClose, busy])
 
   async function pickFile(file) {
     if (!file) return
@@ -59,9 +63,11 @@ export default function AvatarPicker({ current, onPick, onClose, onUpload }) {
     try {
       await onUpload?.(file)
       onClose?.()
-    } catch {
+    } catch (e) {
       // 失败必须说出来：静默失败会让人以为"换好了"，下次刷新才发现没换
       setErr('上传失败，换张图或稍后再试')
+      // 也要上报：否则线上"所有人都传不上"这种事（比如存桶没建）你只能等人来投诉
+      report('avatar-upload', e, { size: file.size, type: file.type })
     } finally {
       setBusy(false)
       if (fileRef.current) fileRef.current.value = '' // 同一张图再选一次也要能触发 change
@@ -110,6 +116,7 @@ export default function AvatarPicker({ current, onPick, onClose, onUpload }) {
             <button
               key={id}
               onClick={() => { onPick?.(id); onClose?.() }}
+              disabled={busy} // 上传中别让人再选预设：两个写入竞速，最后谁落地全看运气
               title={`头像 ${id}`}
               aria-label={`选择头像 ${id}`}
               aria-pressed={active}

@@ -63,7 +63,10 @@ const AVATAR_SIZE = 256
 
 /** 把图片按"填满正方形"裁剪缩放到 256×256，输出 webp（不支持就退回 png）。 */
 async function squareThumbnail(file) {
-  const bitmap = await createImageBitmap(file)
+  // imageOrientation: 'from-image' 必须显式写：竖着拍的 iPhone 照片，像素其实是横的，
+  // 靠 EXIF 里的方向标记纠正。各引擎对默认值不一致（老 Chrome/Safari 按 'none' 处理），
+  // 不写的话头像会**永久**歪 90°——方向被烤进导出的 webp 里，之后再也纠不回来。
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
   const side = Math.min(bitmap.width, bitmap.height) // 居中裁成正方形，不拉伸变形
   const sx = (bitmap.width - side) / 2
   const sy = (bitmap.height - side) / 2
@@ -74,10 +77,12 @@ async function squareThumbnail(file) {
   ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(bitmap, sx, sy, side, side, 0, 0, AVATAR_SIZE, AVATAR_SIZE)
   bitmap.close?.()
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.9))
-  if (blob) return { blob, ext: 'webp' }
-  const png = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
-  return { blob: png, ext: 'png' }
+  // 不支持 webp 编码的引擎会**静默**吐回 PNG（照样返回 blob），
+  // 所以扩展名要认 blob.type，不能认"我请求的是什么"——否则文件名会说谎。
+  let blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.9))
+  if (!blob) blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+  if (!blob) throw new Error('这张图没法处理')
+  return { blob, ext: blob.type === 'image/webp' ? 'webp' : 'png' }
 }
 
 /**
