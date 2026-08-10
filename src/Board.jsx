@@ -5,6 +5,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { Bell, ChevronLeft, ChevronRight, CircleCheck, Menu, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Pin, PinOff, Search, Settings } from 'lucide-react'
 import { report } from './lib/report'
 import AvatarPicker, { avatarSrc } from './components/AvatarPicker'
+import { uploadAvatar } from './lib/storage'
 import { supabase } from './lib/supabase'
 import { friendlyDbError } from './lib/errors'
 import { inPeriod, offsetOf, periodHeader, periodRange } from './lib/period'
@@ -607,6 +608,19 @@ export default function Board({ session }) {
   // 成员"有新动态"红点已按海涛撤掉（2026-08-10，不显示）。数据源 loadRecentActivity
   // 和 lastViewed 记录都还在（viewPage 仍写"看过时间"），要恢复红点见 git 本次提交。
   const [avatarOpen, setAvatarOpen] = useState(false)
+  // 换头像：先本地生效（换头像应当是立刻的），落库失败再退回去。
+  // 预设和自定义共用这一段 —— 两条路只有"存进去的值"不同，其余行为必须一致。
+  const saveAvatar = useCallback(async (value, { throwOnError = false } = {}) => {
+    const prev = me?.avatar ?? null
+    setProfiles((xs) => xs.map((p) => (p.id === me?.id ? { ...p, avatar: value } : p)))
+    const { error } = await supabase.from('profiles').update({ avatar: value }).eq('id', me?.id)
+    if (!error) return
+    // 静默回退等于"点了没反应" —— 用户无从判断是没点中还是存失败了。
+    setProfiles((xs) => xs.map((p) => (p.id === me?.id ? { ...p, avatar: prev } : p)))
+    report('avatar', error)
+    if (throwOnError) throw error // 上传路径：交给选择器就地显示，不弹 alert
+    alert('头像没保存上，稍后再试。')
+  }, [me?.avatar, me?.id])
 
   // 网站图标跟着自己选的头像走 —— 海涛要的"网页里的 logo 也同步"。
   // index.html 里那个 <link rel="icon"> 初始指向默认头像，这里改的是同一个节点。
@@ -914,17 +928,12 @@ export default function Board({ session }) {
               <AvatarPicker
                 current={me.avatar}
                 onClose={() => setAvatarOpen(false)}
-                onPick={async (id) => {
-                  // 先本地生效（换头像应当是立刻的），落库失败再退回去。
-                  const prev = me.avatar ?? null
-                  setProfiles((xs) => xs.map((p) => (p.id === me.id ? { ...p, avatar: id } : p)))
-                  const { error } = await supabase.from('profiles').update({ avatar: id }).eq('id', me.id)
-                  if (error) {
-                    // 静默回退等于"点了没反应" —— 用户无从判断是没点中还是存失败了。
-                    setProfiles((xs) => xs.map((p) => (p.id === me.id ? { ...p, avatar: prev } : p)))
-                    report('avatar', error)
-                    alert('头像没保存上，稍后再试。')
-                  }
+                onPick={saveAvatar}
+                onUpload={async (file) => {
+                  // 先传图（拿到 custom:<path>），再存进 profiles —— 顺序不能反：
+                  // 先写库的话，上传失败就留下一个指向不存在文件的头像，全员看到裂图。
+                  const value = await uploadAvatar(file, me.id)
+                  await saveAvatar(value, { throwOnError: true })
                 }}
               />
             )}

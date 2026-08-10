@@ -30,6 +30,7 @@ export default [
         requestAnimationFrame: 'readonly', getComputedStyle: 'readonly', DOMParser: 'readonly',
         Element: 'readonly', structuredClone: 'readonly', HTMLElement: 'readonly', Node: 'readonly',
         URLSearchParams: 'readonly', confirm: 'readonly', FormData: 'readonly', AbortController: 'readonly',
+        createImageBitmap: 'readonly', KeyboardEvent: 'readonly', MouseEvent: 'readonly',
       },
     },
   },
