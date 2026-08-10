@@ -3,7 +3,6 @@ import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from 
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Bell, ChevronLeft, ChevronRight, CircleCheck, Menu, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Pin, PinOff, Search, Settings } from 'lucide-react'
-import { loadRecentActivity } from './lib/docsApi'
 import { report } from './lib/report'
 import AvatarPicker, { avatarSrc } from './components/AvatarPicker'
 import { supabase } from './lib/supabase'
@@ -40,7 +39,7 @@ const loadLastViewed = () => {
 // 首次进入：凭邀请链接起名进入（没有邀请 = 进不来）
 // 侧栏成员行：直接按住名字拖动排序（顺序存本地，纯个人视图偏好，不进数据库）
 // 拖动中的那一行用选中同款底色高亮
-function SortableMemberRow({ p, isMe, active, news, pinned, onClick, onTogglePin }) {
+function SortableMemberRow({ p, isMe, active, pinned, onClick, onTogglePin }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: p.id })
   return (
     <div
@@ -59,7 +58,6 @@ function SortableMemberRow({ p, isMe, active, news, pinned, onClick, onTogglePin
           {isMe ? '（我）' : ''}
         </span>
       </button>
-      {news && <span className="ml-1 h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" title="有新动态" aria-label="有新动态" />}
       {/* 置顶/取消置顶：纯图标、只在 hover 出现（置顶态本身靠分组「置顶成员」体现，按钮不常驻）。
           未置顶=📌(Pin)、已置顶=斜线📌(PinOff)。个人偏好、存本地。 */}
       <button
@@ -606,16 +604,9 @@ export default function Board({ session }) {
     setTimeout(locate, 160)
   }, [viewPage, user.id])
 
-  // 谁最近写过东西 —— 红点的数据源。
-  // 原来读的是 allEntries，而 entries 模型下线后它恒为空数组，
-  // 所以这个红点已经**永远不会亮**了很久，界面上却看不出来。
+  // 成员"有新动态"红点已按海涛撤掉（2026-08-10，不显示）。数据源 loadRecentActivity
+  // 和 lastViewed 记录都还在（viewPage 仍写"看过时间"），要恢复红点见 git 本次提交。
   const [avatarOpen, setAvatarOpen] = useState(false)
-  const [recentActivity, setRecentActivity] = useState({})
-  useEffect(() => {
-    let alive = true
-    loadRecentActivity().then((m) => alive && setRecentActivity(m)).catch(() => {})
-    return () => { alive = false }
-  }, [pageUserId, channel])
 
   // 网站图标跟着自己选的头像走 —— 海涛要的"网页里的 logo 也同步"。
   // index.html 里那个 <link rel="icon"> 初始指向默认头像，这里改的是同一个节点。
@@ -629,16 +620,6 @@ export default function Board({ session }) {
     }
     link.href = href
   }, [me?.avatar])
-
-  const hasNews = useCallback(
-    (p) => {
-      if (!me || p.id === me.id || p.id === pageUserId) return false
-      const seen = lastViewed[p.id] || '1970-01-01'
-      const latest = recentActivity[p.id]
-      return Boolean(latest && latest > seen)
-    },
-    [me, pageUserId, lastViewed, recentActivity],
-  )
 
   const pageEntries = useMemo(
     () => allEntries.filter((e) => e.owner === pageUserId),
@@ -1004,7 +985,6 @@ export default function Board({ session }) {
                       p={p}
                       isMe={p.id === me.id}
                       active={p.id === pageUserId && view === 'paper'}
-                      news={hasNews(p)}
                       pinned
                       onClick={() => viewPage(p.id)}
                       onTogglePin={togglePin}
@@ -1024,7 +1004,6 @@ export default function Board({ session }) {
                   p={p}
                   isMe={p.id === me.id}
                   active={p.id === pageUserId && view === 'paper'}
-                  news={hasNews(p)}
                   pinned={false}
                   onClick={() => viewPage(p.id)}
                   onTogglePin={togglePin}
