@@ -90,7 +90,10 @@ export default function AvatarPicker({ current, onPick, onClose, onUpload }) {
             'flex h-10 w-10 cursor-pointer items-center justify-center rounded-[7px] border border-dashed transition-colors ' +
             (busy ? 'opacity-60' : 'hover:bg-[var(--nav-soft)]')
           }
-          style={{ borderColor: 'var(--line-strong)', color: 'var(--ink-muted)', outline: custom ? '2px solid var(--ink)' : undefined, outlineOffset: custom ? '1px' : undefined }}
+          style={{
+            borderColor: custom ? 'var(--accent)' : 'var(--line-strong)',
+            color: custom ? 'var(--accent)' : 'var(--ink-muted)',
+          }}
         >
           <Plus size={16} />
         </button>
@@ -115,8 +118,10 @@ export default function AvatarPicker({ current, onPick, onClose, onUpload }) {
               aria-pressed={active}
               // cursor-pointer 是显式加的：Tailwind v4 起 <button> 默认是 cursor: default，
               // 不写的话鼠标停在可点的头像上仍然是箭头，看起来像不可点。
+              // 选中态：柔和的主题色细描边，不用黑色粗框（海涛：黑色那个有点丑）。
+              // 描边贴着图（offset 0）而不是浮在外面 —— 6px 的图上，外扩的框会显得很重。
               className={'cursor-pointer overflow-hidden rounded-[7px] transition-opacity ' + (active ? '' : 'opacity-70 hover:opacity-100')}
-              style={active ? { outline: '2px solid var(--ink)', outlineOffset: '1px' } : undefined}
+              style={active ? { outline: '1.5px solid var(--accent)', outlineOffset: '0px' } : undefined}
             >
               <img src={avatarSrc(id)} alt="" className="block h-10 w-10 object-cover" />
             </button>
