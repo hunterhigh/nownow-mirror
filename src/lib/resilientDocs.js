@@ -415,8 +415,6 @@ if (typeof window !== 'undefined') {
   supabase.auth.onAuthStateChange((event) => {
     if (event !== 'SIGNED_OUT') return
     docCache.clear()
-    // favicon 缓存也清掉：换账号登录时，标签页图标不该还挂着上一个人的头像
-    try { localStorage.removeItem('nownow_favicon'); localStorage.removeItem('nownow_favicon_for') } catch { /* 无所谓 */ }
     try {
       for (let i = localStorage.length - 1; i >= 0; i--) {
         const key = localStorage.key(i)

@@ -2,29 +2,12 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <!-- ⚠️ 这里**故意没有**写死的 <link rel="icon">。
-         写死一行再由 JS 改 href，浏览器就会先显示那一张、再换成你的 —— 这就是闪烁的根。
-         改 href 只是把闪烁提前，消不掉它。所以图标节点完全由下面这段脚本创建：
-         整个生命周期里 href 只被赋值一次，没有"从 A 换到 B"这回事。 -->
-    <script>
-      // 在任何渲染之前就把图标定下来：有上次记下的就用它，没有才用默认头像。
-      (function () {
-        var href = '/avatars/a3.png'
-        try {
-          var saved = localStorage.getItem('nownow_favicon')
-          // data: 自带图片内容、零网络，是最稳的一种；
-          // 其余只认同源（昨天换过域名，旧域名的绝对地址会是个裂图，
-          // 宁可用默认也不要贴坏的）。
-          if (saved && (saved.indexOf('data:image/') === 0 || saved.charAt(0) === '/' || saved.indexOf(location.origin) === 0)) {
-            href = saved
-          }
-        } catch (e) { /* 隐私模式没有 localStorage：用默认，不影响任何功能 */ }
-        var link = document.createElement('link')
-        link.rel = 'icon'
-        link.href = href
-        document.head.appendChild(link)
-      })()
-    </script>
+    <!-- 指向头像本体而不是单独做一张 favicon：登录后 Board 会把这个节点的 href
+         换成用户选的头像，用同一个文件就只下载一次、共用一份缓存。
+         刷新时会先显示这张、再换成你的头像 —— 那一下闪烁按海涛的决定不处理了：
+         消掉它要么让图标依赖 JS，要么把图片缓存进 localStorage，
+         为一个刷新时的瞬间不值得。 -->
+    <link rel="icon" type="image/png" href="/avatars/a3.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <!-- maximum-scale=1：禁止 iOS 点输入框时整页自动放大（捏合缩放不受影响） -->
