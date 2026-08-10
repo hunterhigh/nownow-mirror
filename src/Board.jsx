@@ -743,7 +743,23 @@ export default function Board({ session }) {
      
   }, [mobileSearch])
 
-  // 成员显示顺序：本人默认第一位，拖拽可调，存本地
+  // ---- 个人偏好（置顶 / 成员排序）：**云端为准，本地做秒显种子**（migration-035）----
+  //
+  // 2026-08-10 之前只存 localStorage，换域名/换电脑就"丢"（用户真实反馈）。
+  // 现在写入走 profiles.prefs（跟账号走），localStorage 只当首屏种子和离线兜底。
+  // 首次在新环境打开时：云端是空的而本地有旧数据 → 自动把本地搬上云（一次性迁移，
+  // 让老域名攒下的置顶在新域名自动回来 —— 前提是同一台浏览器；跨设备就以云端为准）。
+  const prefsSyncedRef = useRef(false)
+  const savePrefs = useCallback((patch) => {
+    // 不 await：偏好写失败不打扰用户（下次操作会再写）；但要记日志好排查
+    supabase
+      .from('profiles')
+      .update({ prefs: patch })
+      .eq('id', user.id)
+      .then(({ error }) => { if (error) console.error('[prefs] 保存失败', error) })
+  }, [user.id])
+
+  // 成员显示顺序：本人默认第一位，拖拽可调
   const [memberOrder, setMemberOrder] = useState(() => {
     try { return JSON.parse(localStorage.getItem(MEMBER_ORDER_KEY) || '[]') } catch { return [] }
   })
@@ -758,18 +774,41 @@ export default function Board({ session }) {
   // 团队成员列表 = 排除本人（本人入口走「我的目标」）；团队目标也用它，沿用同一排序
   const teamMembers = useMemo(() => orderedProfiles.filter((p) => p.id !== user.id), [orderedProfiles, user.id])
 
-  // 置顶成员：个人偏好，存 localStorage，不进库、不影响别人。点 📌 切换某人是否置顶
+  // 置顶成员：个人偏好。点 📌 切换某人是否置顶
   const [pinnedIds, setPinnedIds] = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem(PINNED_KEY) || '[]')) } catch { return new Set() }
   })
+
+  // 云端 prefs 到手后对齐本地（只跑一次）。云端有 → 云端为准；
+  // 云端空而本地有 → 把本地搬上云（老域名/旧版本留下的偏好自动迁移）。
+  useEffect(() => {
+    if (prefsSyncedRef.current || !me) return
+    prefsSyncedRef.current = true
+    const cloud = me.prefs || {}
+    const localPinned = (() => { try { return JSON.parse(localStorage.getItem(PINNED_KEY) || '[]') } catch { return [] } })()
+    const localOrder = (() => { try { return JSON.parse(localStorage.getItem(MEMBER_ORDER_KEY) || '[]') } catch { return [] } })()
+    if (Array.isArray(cloud.pinned) || Array.isArray(cloud.memberOrder)) {
+      const pinned = Array.isArray(cloud.pinned) ? cloud.pinned : localPinned
+      const order = Array.isArray(cloud.memberOrder) ? cloud.memberOrder : localOrder
+      setPinnedIds(new Set(pinned))
+      setMemberOrder(order)
+      localStorage.setItem(PINNED_KEY, JSON.stringify(pinned))
+      localStorage.setItem(MEMBER_ORDER_KEY, JSON.stringify(order))
+    } else if (localPinned.length || localOrder.length) {
+      savePrefs({ ...cloud, pinned: localPinned, memberOrder: localOrder })
+    }
+  }, [me, savePrefs])
+
   const togglePin = useCallback((id) => {
     setPinnedIds((prev) => {
       const next = new Set(prev)
       next.has(id) ? next.delete(id) : next.add(id)
       localStorage.setItem(PINNED_KEY, JSON.stringify([...next]))
+      // 云端同步：以 me.prefs 为底，避免覆盖掉别处写进 prefs 的其他偏好
+      savePrefs({ ...(me?.prefs || {}), pinned: [...next], memberOrder })
       return next
     })
-  }, [])
+  }, [me, memberOrder, savePrefs])
   const pinnedMembers = useMemo(() => teamMembers.filter((p) => pinnedIds.has(p.id)), [teamMembers, pinnedIds])
   const restMembers = useMemo(() => teamMembers.filter((p) => !pinnedIds.has(p.id)), [teamMembers, pinnedIds])
   const memberSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
@@ -779,6 +818,7 @@ export default function Board({ session }) {
     const next = arrayMove(ids, ids.indexOf(active.id), ids.indexOf(over.id))
     setMemberOrder(next)
     localStorage.setItem(MEMBER_ORDER_KEY, JSON.stringify(next))
+    savePrefs({ ...(me?.prefs || {}), pinned: [...pinnedIds], memberOrder: next })
   }
 
   // 通知内容 = 待认领的@ + 我派出去已解决等我关闭的
