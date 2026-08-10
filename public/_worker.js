@@ -26,7 +26,10 @@ function getSupabaseOrigin(request, env) {
 // 正式域名启用后（2026-08-09，nownow.cc），老地址 301 到新域名。
 // 重定向精确主机名：老地址 + www 都归到裸域名：
 //   · 预览部署（<hash>.now-now.pages.dev）不重定向 —— 那是拿来验证构建的
-//   · /sb/* 也重定向 —— 老页面已经打不开了，API 也不该再从老域名走
+//   · ⚠️ /sb/*（API 代理）**绝不能**重定向 —— 老构建会在用户浏览器里缓存好几天，
+//     它们还在从老域名发 API 请求。301 会把 POST 变成跨域 GET，登录直接炸
+//     （2026-08-10 真实事故：用户端 "Unexpected end of JSON input"，就是这个）。
+//     只重定向页面导航；等老缓存自然过期后 API 流量自己就归零了。
 // 用 301（永久）：让浏览器和搜索引擎记住新地址。
 const CANONICAL_HOST = 'nownow.cc'
 const REDIRECT_HOSTS = new Set(['now-now.pages.dev', 'www.nownow.cc'])
@@ -35,7 +38,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url)
 
-    if (REDIRECT_HOSTS.has(url.hostname)) {
+    if (REDIRECT_HOSTS.has(url.hostname) && !url.pathname.startsWith('/sb/')) {
       url.hostname = CANONICAL_HOST
       return Response.redirect(url.toString(), 301)
     }
