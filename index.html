@@ -5,6 +5,22 @@
     <!-- 指向头像本体而不是单独做一张 favicon：登录后 Board 会把这个节点的 href
          换成用户选的头像，用同一个文件就只下载一次、共用一份缓存。 -->
     <link rel="icon" type="image/png" href="/avatars/a3.png" />
+    <script>
+      // 上一次用的头像，在 React 挂载**之前**就贴上去。
+      //
+      // 不做这一步的话每次刷新都会闪一下：浏览器先按上面那行显示默认头像，
+      // 等 JS 跑起来、profiles 拿到手，才换成你自己的 —— 用户看到的就是
+      // "先默认、再切回来"（海涛报的就是这个）。
+      //
+      // 只认同源地址：换过域名之后，旧域名留下的绝对地址不能再用（昨天刚换过一次），
+      // 宁可闪一下默认，也不要贴一个加载不出来的图标。
+      try {
+        var saved = localStorage.getItem('nownow_favicon')
+        if (saved && (saved.charAt(0) === '/' || saved.indexOf(location.origin) === 0)) {
+          document.querySelector("link[rel~='icon']").href = saved
+        }
+      } catch (e) { /* 隐私模式没有 localStorage：照旧显示默认，不影响任何功能 */ }
+    </script>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <!-- maximum-scale=1：禁止 iOS 点输入框时整页自动放大（捏合缩放不受影响） -->

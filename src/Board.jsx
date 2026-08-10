@@ -624,8 +624,12 @@ export default function Board({ session }) {
 
   // 网站图标跟着自己选的头像走 —— 海涛要的"网页里的 logo 也同步"。
   // index.html 里那个 <link rel="icon"> 初始指向默认头像，这里改的是同一个节点。
+  //
+  // 顺便把结果记在 localStorage：下次刷新时 index.html 里的内联脚本会在 React
+  // 挂载前就贴上它，消掉"先默认、再切回自己头像"的那一下闪烁。
   useEffect(() => {
-    const href = avatarSrc(me?.avatar)
+    if (!me) return // 还没拿到 profile 时别写缓存，否则会把默认头像当成"我的选择"记下来
+    const href = avatarSrc(me.avatar)
     let link = document.querySelector("link[rel~='icon']")
     if (!link) {
       link = document.createElement('link')
@@ -633,7 +637,8 @@ export default function Board({ session }) {
       document.head.appendChild(link)
     }
     link.href = href
-  }, [me?.avatar])
+    try { localStorage.setItem('nownow_favicon', href) } catch { /* 配额满/隐私模式：只是下次会闪一下 */ }
+  }, [me])
 
   const pageEntries = useMemo(
     () => allEntries.filter((e) => e.owner === pageUserId),
