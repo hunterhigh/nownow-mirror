@@ -2,24 +2,28 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <!-- 指向头像本体而不是单独做一张 favicon：登录后 Board 会把这个节点的 href
-         换成用户选的头像，用同一个文件就只下载一次、共用一份缓存。 -->
-    <link rel="icon" type="image/png" href="/avatars/a3.png" />
+    <!-- ⚠️ 这里**故意没有**写死的 <link rel="icon">。
+         写死一行再由 JS 改 href，浏览器就会先显示那一张、再换成你的 —— 这就是闪烁的根。
+         改 href 只是把闪烁提前，消不掉它。所以图标节点完全由下面这段脚本创建：
+         整个生命周期里 href 只被赋值一次，没有"从 A 换到 B"这回事。 -->
     <script>
-      // 上一次用的头像，在 React 挂载**之前**就贴上去。
-      //
-      // 不做这一步的话每次刷新都会闪一下：浏览器先按上面那行显示默认头像，
-      // 等 JS 跑起来、profiles 拿到手，才换成你自己的 —— 用户看到的就是
-      // "先默认、再切回来"（海涛报的就是这个）。
-      //
-      // 只认同源地址：换过域名之后，旧域名留下的绝对地址不能再用（昨天刚换过一次），
-      // 宁可闪一下默认，也不要贴一个加载不出来的图标。
-      try {
-        var saved = localStorage.getItem('nownow_favicon')
-        if (saved && (saved.charAt(0) === '/' || saved.indexOf(location.origin) === 0)) {
-          document.querySelector("link[rel~='icon']").href = saved
-        }
-      } catch (e) { /* 隐私模式没有 localStorage：照旧显示默认，不影响任何功能 */ }
+      // 在任何渲染之前就把图标定下来：有上次记下的就用它，没有才用默认头像。
+      (function () {
+        var href = '/avatars/a3.png'
+        try {
+          var saved = localStorage.getItem('nownow_favicon')
+          // data: 自带图片内容、零网络，是最稳的一种；
+          // 其余只认同源（昨天换过域名，旧域名的绝对地址会是个裂图，
+          // 宁可用默认也不要贴坏的）。
+          if (saved && (saved.indexOf('data:image/') === 0 || saved.charAt(0) === '/' || saved.indexOf(location.origin) === 0)) {
+            href = saved
+          }
+        } catch (e) { /* 隐私模式没有 localStorage：用默认，不影响任何功能 */ }
+        var link = document.createElement('link')
+        link.rel = 'icon'
+        link.href = href
+        document.head.appendChild(link)
+      })()
     </script>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />

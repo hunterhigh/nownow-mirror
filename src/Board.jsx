@@ -4,7 +4,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from '@dnd-kit/utilities'
 import { Bell, ChevronLeft, ChevronRight, CircleCheck, Menu, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Pin, PinOff, Search, Settings } from 'lucide-react'
 import { report } from './lib/report'
-import AvatarPicker, { avatarSrc } from './components/AvatarPicker'
+import AvatarPicker, { avatarSrc, isCustomAvatar } from './components/AvatarPicker'
 import { uploadAvatar } from './lib/storage'
 import { supabase } from './lib/supabase'
 import { friendlyDbError } from './lib/errors'
@@ -637,7 +637,33 @@ export default function Board({ session }) {
       document.head.appendChild(link)
     }
     link.href = href
-    try { localStorage.setItem('nownow_favicon', href) } catch { /* 配额满/隐私模式：只是下次会闪一下 */ }
+    // 记下来给下次用（index.html 的内联脚本会在渲染前贴上它）。
+    //
+    // 自定义头像存在 Storage 上，即使地址贴得再早，图片本身仍要走一次网络才出现 ——
+    // 表现还是"先空/旧图标、再变成我的"。所以把图片本身转成 data: 存起来：
+    // 下次是零网络、当场就有。预设图是本地静态资源，够快，不值得占这个空间。
+    try {
+      localStorage.setItem('nownow_favicon', href)
+      // 只在"这张图还没转存过"时取一次，不是每次挂载都取
+      if (isCustomAvatar(me.avatar) && localStorage.getItem('nownow_favicon_for') !== href) {
+        fetch(href)
+          .then((r) => (r.ok ? r.blob() : Promise.reject(new Error('favicon fetch'))))
+          .then((b) => new Promise((res, rej) => {
+            const fr = new FileReader()
+            fr.onload = () => res(fr.result)
+            fr.onerror = rej
+            fr.readAsDataURL(b)
+          }))
+          .then((dataUrl) => {
+            // 200KB 封顶：localStorage 是给草稿保命的，别让一张图挤掉它
+            if (typeof dataUrl === 'string' && dataUrl.length < 200_000) {
+              localStorage.setItem('nownow_favicon', dataUrl)
+              localStorage.setItem('nownow_favicon_for', href)
+            }
+          })
+          .catch(() => { /* 取不到就退回用地址，最坏情况是恢复成现在这样 */ })
+      }
+    } catch { /* 配额满/隐私模式：只是下次会闪一下 */ }
   }, [me])
 
   const pageEntries = useMemo(
