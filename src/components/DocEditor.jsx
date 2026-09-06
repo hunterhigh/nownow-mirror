@@ -2,32 +2,23 @@ import { useEffect, useRef, useState } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import { TextSelection } from '@tiptap/pm/state'
 import { BubbleMenu } from '@tiptap/react/menus'
-import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
-import Highlight from '@tiptap/extension-highlight'
 import Mention from '@tiptap/extension-mention'
-import TaskList from '@tiptap/extension-task-list'
-import TaskItem from '@tiptap/extension-task-item'
-import { Table } from '@tiptap/extension-table'
-import TableRow from '@tiptap/extension-table-row'
-import TableHeader from '@tiptap/extension-table-header'
-import TableCell from '@tiptap/extension-table-cell'
-import { TextStyle } from '@tiptap/extension-text-style'
-import { Color } from '@tiptap/extension-color'
-import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
-import { createLowlight, common } from 'lowlight'
 import { ResizableImage } from './ResizableImage'
 import BlockHandle from './BlockHandle'
 import CarryHandle from './CarryHandle'
-import { SlashCommand } from './SlashCommand'
-import { Callout } from './Callout'
-import { Bold, CalendarDays, CheckSquare, ChevronDown, Code, Heading1, Heading2, Heading3, Highlighter, Image as ImageIcon, Info, Italic, List, ListOrdered, Lock, Minus, Quote, Strikethrough, Table as TableIcon, Underline as UnderlineIcon, Unlock } from 'lucide-react'
+import { allowSuggestionCommand, SlashCommand } from './SlashCommand'
+import { createSlashCommandItems, filterSlashCommandItems } from './SlashCommandItems'
+import { Bold, CheckSquare, ChevronDown, Highlighter, Italic, List, ListOrdered, Lock, Quote, Strikethrough, Underline as UnderlineIcon, Unlock } from 'lucide-react'
 import { uploadImage } from '../lib/storage'
 import { setUploadProgress, clearUploadProgress } from '../lib/uploadProgress'
-import { PrivateBlock, PrivateBlockLock, toggleBlockPrivate, isBlockPrivate } from '../lib/privateBlock'
-import { periodHeader } from '../lib/period'
-import { DateStamp } from './DateStamp'
+import { PrivateBlockLock, toggleBlockPrivate, isBlockPrivate } from '../lib/privateBlock'
+import { createMarkdownExtension, docJsonToText, markdownToDocJson } from '../lib/markdown'
+import { pasteLiteralText } from '../lib/editorClipboard'
+import { newMentionId } from '../lib/mentionIds'
+import { createPortableEditorExtensions } from '../lib/editorExtensions'
+import { MarkdownInputRules } from './MarkdownInputRules'
 
 // 隐私 🔒 总开关：必须等数据侧把 docs/版本历史 SELECT 锁成 owner-only（migration-020 STEP 2）后再开。
 // false 时悬浮条显示原来的「引用」按钮、没人能标私密（后端隔离可以先部署、纯打底、无泄露窗口）。
@@ -35,9 +26,22 @@ import { DateStamp } from './DateStamp'
 const PRIVACY_ENABLED = true
 import './doc-editor.css'
 
-const lowlight = createLowlight(common)
-const TEXT_COLORS = ['#e11d48', '#ea580c', '#ca8a04', '#16a34a', '#2563eb', '#9333ea'] // 字体色：红橙黄绿蓝紫
-const HL_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8'] // 背景高亮：黄绿蓝粉
+const TEXT_COLORS = [
+  { name: '墨', value: '#29332d' },
+  { name: '朱砂', value: '#57251f' },
+  { name: '黛蓝', value: '#1d3446' },
+  { name: '竹青', value: '#263b2e' },
+  { name: '茶褐', value: '#463127' },
+  { name: '梅紫', value: '#4b2c39' },
+]
+const HL_COLORS = [
+  { name: '月白', value: '#d8d5c7' },
+  { name: '竹青', value: '#aec2aa' },
+  { name: '薄柿', value: '#ead7ce' },
+  { name: '枯草', value: '#d5c99e' },
+  { name: '薄缥', value: '#c7d4dd' },
+  { name: '梅鼠', value: '#d8c5cc' },
+]
 
 // 给 mention 节点加一个稳定唯一的 mid（插入时生成），让「每个 @ = 一条独立通知/任务」：
 // syncDocMentions 按 mid 存 doc_mentions，同一人被 @ 多次也各算各的、各自有 snippet。
@@ -47,14 +51,12 @@ const MentionWithId = Mention.extend({
       ...this.parent?.(),
       mid: {
         default: null,
-        parseHTML: (el) => el.getAttribute('data-mid') || newMid(), // HTML 粘贴的老 mention 没有就现生成
+        parseHTML: (el) => el.getAttribute('data-mid') || newMentionId(), // HTML 粘贴的老 mention 没有就现生成
         renderHTML: (attrs) => (attrs.mid ? { 'data-mid': attrs.mid } : {}),
       },
     }
   },
 })
-const newMid = () => (crypto?.randomUUID ? crypto.randomUUID() : 'm-' + Math.random().toString(36).slice(2) + Date.now())
-
 // 插图：先用本地预览秒显（不等上传），后台传 Storage，传完把 src 换成公网地址。
 function insertImageFromFile(view, file, uploaderId) {
   const localUrl = URL.createObjectURL(file)
@@ -100,8 +102,8 @@ function insertImageFromFile(view, file, uploaderId) {
 // P0：Tiptap 单人版文档内核。替代「每行一个 entry + textarea」的旧模型——
 // 整页就是一份 ProseMirror 文档。markdown 输入规则、行内格式、悬浮工具条都走原生扩展。
 // content 进：ProseMirror JSON（或空）；out：onChange({ json, text }) —— json 落库、text 喂搜索/RLS。
-// @提及 / 图片插入 下一步加；Yjs/协作（老铁的 DO）等同篇协作需求出现再叠。
-export default function DocEditor({ content, onChange, placeholder = '写点什么…', editable = true, profiles = [], mentionFreq = {}, uploaderId, fill = false, onCarry }) {
+// @提及、图片与导入已叠加；Yjs／同篇实时协作仍等明确团队需求出现后再做。
+export default function DocEditor({ content, onChange, onCreateImportedDocument, placeholder = '写点什么…', editable = true, profiles = [], mentionFreq = {}, uploaderId, fill = false, onCarry }) {
   // @ 弹选：suggestion 的 items/onKeyDown 需读最新 profiles/选中态 → 用 ref 兜
   const profilesRef = useRef(profiles)
   profilesRef.current = profiles
@@ -117,72 +119,49 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
   const slashRef = useRef(null)
   slashRef.current = slash
   const fileInputRef = useRef(null)
+  const markdownFileInputRef = useRef(null)
+  const markdownCreateButtonRef = useRef(null)
+  const [markdownNotice, setMarkdownNotice] = useState('')
+  const [pendingMarkdownImport, setPendingMarkdownImport] = useState(null)
+  const [markdownImporting, setMarkdownImporting] = useState(false)
+  const [markdownImportError, setMarkdownImportError] = useState('')
   const [colorPanel, setColorPanel] = useState(false) // 选区工具条里「A」颜色面板展开态（飞书式整合）
   const [, forceTick] = useState(0) // 选区变化时强制重渲，让悬浮条按钮（如锁 🔒/🔓）跟住当前块状态
 
-  const slashItems = [
-    { title: '待办清单', icon: CheckSquare, kw: 'todo task daiban 待办 清单', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleTaskList().run() },
-    // 当前时间：插一个 dateStamp 节点（不是文字，理由见 DateStamp.js）。
-    // 显示文本**复用 periodHeader('today')** —— 时间线抬头用的同一个函数，
-    // 而不是另写一套 `${m}月${d}日`：那样一改格式（比如跨年补「2027年」）就会两处对不上。
-    //
-    // 值在**点击这一刻**算好冻进 attrs。开着标签页跨过午夜的话，
-    // 提前算好的那份会插入昨天；而事后现算的话，昨天写的记录明天看会变成明天。
-    // 它是块级的、独占一行；后面跟一个空段落，光标落在下一行接着写。
-    { title: '当前时间', icon: CalendarDays, kw: 'date time 时间 日期 今天 today shijian riqi', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).insertContent([{ type: 'dateStamp', attrs: { at: new Date().toISOString(), label: periodHeader('today', 0) } }, { type: 'paragraph' }]).run() },
-    { title: '标题 1', icon: Heading1, kw: 'h1 标题 title', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 1 }).run() },
-    { title: '标题 2', icon: Heading2, kw: 'h2 标题', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 2 }).run() },
-    { title: '标题 3', icon: Heading3, kw: 'h3 标题', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 3 }).run() },
-    { title: '项目符号', icon: List, kw: 'bullet list 列表 符号', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleBulletList().run() },
-    { title: '编号列表', icon: ListOrdered, kw: 'number ordered 编号', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleOrderedList().run() },
-    // 设为隐私：把当前这条标私密，接着输入的就是私密内容（只你自己可见，数据侧剥离兜底）。放在编号列表下面。
-    ...(PRIVACY_ENABLED ? [{ title: '设为隐私', icon: Lock, kw: 'private 隐私 simi lock 锁', command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).run(); toggleBlockPrivate(editor) } }] : []),
-    { title: '引用', icon: Quote, kw: 'quote 引用', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleBlockquote().run() },
-    { title: '代码块', icon: Code, kw: 'code 代码', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleCodeBlock().run() },
-    { title: '分割线', icon: Minus, kw: 'divider hr 分割 线', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).setHorizontalRule().run() },
-    { title: '表格', icon: TableIcon, kw: 'table 表格', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run() },
-    { title: '提示块', icon: Info, kw: 'callout 提示 info 块', command: ({ editor, range }) => editor.chain().focus().deleteRange(range).toggleCallout().run() },
-    { title: '图片', icon: ImageIcon, kw: 'image 图片 picture', command: ({ editor, range }) => { editor.chain().focus().deleteRange(range).run(); fileInputRef.current?.click() } },
-  ]
+  const slashItems = createSlashCommandItems({
+    privacyEnabled: PRIVACY_ENABLED,
+    openImagePicker: () => fileInputRef.current?.click(),
+    openMarkdownPicker: () => markdownFileInputRef.current?.click(),
+  })
 
   const editor = useEditor({
     editable,
     extensions: [
-      // StarterKit v3 已含 bold/italic/strike/underline/link/heading/lists/blockquote/undo 等；codeBlock 换成带高亮的
-      // dropcursor：官方手柄拖拽和 PM 配套，落点线交回默认 dropcursor（主题蓝、3px），拖进列表也能显
-      StarterKit.configure({ heading: { levels: [1, 2, 3] }, codeBlock: false, dropcursor: { color: '#2563eb', width: 3, class: 'doc-dropcursor' }, link: false }),
-      // 链接默认 inclusive() 返回 options.autolink(true)→链接后打字会续上蓝色下划线。解耦：保留 autolink 自动识别 URL，
-      // 但 mark 改成非包含——链接末尾继续打字是普通文字（和 Notion/飞书/Google Docs 一致），不再把后面的字吞进链接。
-      // openOnClick 关掉、点击打开统一交给下面 editorProps.handleClick（和图片同一套口径）：
-      // 可编辑页 普通点=放光标编辑、Cmd/Ctrl+点=新标签打开；只读页 点=打开。
-      Link.extend({ inclusive: () => false }).configure({ openOnClick: false }),
-      CodeBlockLowlight.configure({ lowlight }), // 代码块语法高亮
-      Highlight.configure({ multicolor: true }), // ==高亮==，支持多色背景
-      TextStyle,
-      Color, // 字体颜色
-      ResizableImage,
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Table.configure({ resizable: true }),
-      TableRow,
-      TableHeader,
-      TableCell,
-      Callout,
-      DateStamp,
-      PrivateBlock, // 逐行私密：给块加 attrs.private（数据侧按它剥离 public 投影）
+      ...createPortableEditorExtensions({
+        starterKitOptions: { dropcursor: { color: '#2563eb', width: 3, class: 'doc-dropcursor' } },
+        // 链接末尾继续打字必须回到普通文字；可编辑时普通点击留给光标，Cmd/Ctrl+点才打开。
+        linkExtension: Link.extend({ inclusive: () => false }).configure({ openOnClick: false }),
+        imageExtension: ResizableImage,
+      }),
+      // Markdown 是编辑器的输入/剪贴板协议，doc_json 仍是真源。普通粘贴可解析
+      // Markdown，Cmd/Ctrl+Shift+V 仍由下方快捷键强制走纯文本。
+      createMarkdownExtension({ transformPastedText: true, transformCopiedText: true }),
       PrivateBlockLock, // 私密块右上角可点的解锁角标（widget）
+      MarkdownInputRules,
       // 块拖拽抓手改用官方 @tiptap/extension-drag-handle-react（见下方 JSX 的 <BlockHandle/>），
       // 不再走自维护 fork——官方版和 PM 的文本选择/dropcursor/拖进列表配套，IME 安全。
       SlashCommand.configure({
         suggestion: {
+          // 中文 IME composition 期间 `/` 可能只是候选输入的一部分，绝不能弹菜单抢焦点。
+          allow: allowSuggestionCommand,
           items: ({ query }) => {
-            const q = query.toLowerCase()
-            return slashItems.filter((it) => it.title.toLowerCase().includes(q) || it.kw.includes(q))
+            return filterSlashCommandItems(slashItems, query)
           },
           render: () => ({
             onStart: (props) => setSlash({ items: props.items, rect: props.clientRect?.(), command: props.command, index: 0 }),
             onUpdate: (props) => setSlash((s) => (s ? { ...s, items: props.items, rect: props.clientRect?.(), command: props.command, index: 0 } : null)),
             onKeyDown: (props) => {
+              if (props.event.isComposing) return false
               const s = slashRef.current
               if (!s || !s.items.length) return false
               if (props.event.key === 'ArrowDown') { setSlash((x) => ({ ...x, index: (x.index + 1) % x.items.length })); return true }
@@ -200,6 +179,7 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
         HTMLAttributes: { class: 'doc-mention' },
         suggestion: {
           char: '@',
+          allow: allowSuggestionCommand,
           // 默认要求 @ 前面是空格/行首 → 「测试@名字」这种紧贴前字的就不触发。null = 任意位置都能 @
           allowedPrefixes: null,
           items: ({ query }) => {
@@ -216,11 +196,12 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
             onUpdate: (props) =>
               setSug((s) => (s ? { ...s, items: props.items, rect: props.clientRect?.(), command: props.command, index: 0 } : null)),
             onKeyDown: (props) => {
+              if (props.event.isComposing) return false
               const s = sugRef.current
               if (!s || !s.items.length) return false
               if (props.event.key === 'ArrowDown') { setSug((x) => ({ ...x, index: (x.index + 1) % x.items.length })); return true }
               if (props.event.key === 'ArrowUp') { setSug((x) => ({ ...x, index: (x.index - 1 + x.items.length) % x.items.length })); return true }
-              if (props.event.key === 'Enter') { const it = s.items[s.index]; if (it) s.command({ id: it.id, label: it.display_name, mid: newMid() }); return true }
+              if (props.event.key === 'Enter') { const it = s.items[s.index]; if (it) s.command({ id: it.id, label: it.display_name, mid: newMentionId() }); return true }
               if (props.event.key === 'Escape') { setSug(null); return true }
               return false
             },
@@ -236,7 +217,7 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
       handleKeyDown: (view, event) => {
         if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === 'KeyV') {
           event.preventDefault()
-          navigator.clipboard?.readText?.().then((text) => { if (text) view.pasteText(text) }).catch(() => {})
+          navigator.clipboard?.readText?.().then((text) => { if (text) pasteLiteralText(view, text) }).catch(() => {})
           return true
         }
         return false
@@ -277,7 +258,7 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
       let changed = false
       editor.state.doc.descendants((node, pos) => {
         if (node.type.name === 'mention' && !node.attrs.mid) {
-          tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, mid: newMid() })
+          tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, mid: newMentionId() })
           changed = true
         }
       })
@@ -302,8 +283,77 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
     if (editor && editor.isEditable !== editable) editor.setEditable(editable)
   }, [editor, editable])
 
+  useEffect(() => {
+    if (!pendingMarkdownImport) return undefined
+    const frame = window.requestAnimationFrame(() => markdownCreateButtonRef.current?.focus())
+    return () => window.cancelAnimationFrame(frame)
+  }, [pendingMarkdownImport])
+
 
   if (!editor) return null
+
+  async function prepareMarkdownImport(file) {
+    setMarkdownNotice('')
+    setMarkdownImportError('')
+    if (!file) return
+    if (file.size > 2 * 1024 * 1024) {
+      setMarkdownNotice('Markdown 文件不能超过 2 MB')
+      return
+    }
+    try {
+      const markdown = await file.text()
+      const imported = markdownToDocJson(markdown)
+      const content = imported?.content || []
+      if (!content.length) {
+        setMarkdownNotice('这个 Markdown 文件没有可导入的内容')
+        return
+      }
+      // 只准备预览，用户确认前不触碰当前文档。
+      setPendingMarkdownImport({
+        fileName: file.name,
+        json: imported,
+        content,
+        text: docJsonToText(imported),
+        preview: docJsonToText(imported).trim().slice(0, 400),
+      })
+    } catch (error) {
+      console.error('Markdown 导入失败', error)
+      setMarkdownNotice('Markdown 导入失败，原文档没有被覆盖')
+    }
+  }
+
+  function confirmMarkdownImport() {
+    if (!pendingMarkdownImport) return
+    // 明确选择“追加导入”后才写入；一次 transaction 可一次 Undo。
+    editor.chain().focus().insertContent(pendingMarkdownImport.content).run()
+    setMarkdownNotice(`已导入 ${pendingMarkdownImport.fileName}`)
+    setPendingMarkdownImport(null)
+    setTimeout(() => setMarkdownNotice(''), 2400)
+  }
+
+  async function createMarkdownImportDocument() {
+    if (!pendingMarkdownImport || !onCreateImportedDocument || markdownImporting) return
+    setMarkdownImporting(true)
+    setMarkdownNotice('')
+    setMarkdownImportError('')
+    try {
+      const created = await onCreateImportedDocument({
+        fileName: pendingMarkdownImport.fileName,
+        json: pendingMarkdownImport.json,
+        text: pendingMarkdownImport.text,
+      })
+      setPendingMarkdownImport(null)
+      const pendingSync = created?.syncState === 'offline' || created?.syncState === 'error'
+      setMarkdownNotice(pendingSync
+        ? `已新建「${created.title}」，内容保留在本地等待同步`
+        : `已新建「${created?.title || pendingMarkdownImport.fileName}」`)
+      setTimeout(() => setMarkdownNotice(''), 3200)
+    } catch (error) {
+      setMarkdownImportError(error?.message || '新建文档失败，原文档没有被修改')
+    } finally {
+      setMarkdownImporting(false)
+    }
+  }
 
   const tb = [
     { icon: Bold, run: () => editor.chain().focus().toggleBold().run(), on: editor.isActive('bold'), title: '加粗' },
@@ -384,8 +434,8 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
                   <span className="text-[13px] font-bold leading-none text-[var(--ink)]">A</span>
                 </button>
                 {TEXT_COLORS.map((c) => (
-                  <button key={'t' + c} type="button" onClick={() => editor.chain().focus().setColor(c).run()} className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-stone-100">
-                    <span className="text-[13px] font-bold leading-none" style={{ color: c }}>A</span>
+                  <button key={'t' + c.value} type="button" title={c.name} aria-label={c.name} onClick={() => editor.chain().focus().setColor(c.value).run()} className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-stone-100">
+                    <span className="text-[13px] font-bold leading-none" style={{ color: c.value }}>A</span>
                   </button>
                 ))}
               </div>
@@ -395,8 +445,8 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
                   <span className="text-[12px] leading-none text-stone-300">/</span>
                 </button>
                 {HL_COLORS.map((c) => (
-                  <button key={'h' + c} type="button" onClick={() => editor.chain().focus().toggleHighlight({ color: c }).run()} className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-stone-100">
-                    <span className="h-4 w-4 rounded" style={{ background: c }} />
+                  <button key={'h' + c.value} type="button" title={c.name} aria-label={c.name} onClick={() => editor.chain().focus().toggleHighlight({ color: c.value }).run()} className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-stone-100">
+                    <span className="h-4 w-4 rounded" style={{ background: c.value }} />
                   </button>
                 ))}
               </div>
@@ -422,7 +472,7 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
               // 键盘上下选中时把当前项滚进视野（人多时下方项不再被裁掉；可见则 no-op）
               ref={(el) => { if (i === sug.index && el) el.scrollIntoView({ block: 'nearest' }) }}
               onMouseEnter={() => setSug((s) => (s ? { ...s, index: i } : s))}
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); sug.command({ id: p.id, label: p.display_name, mid: newMid() }) }}
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); sug.command({ id: p.id, label: p.display_name, mid: newMentionId() }) }}
               className={
                 'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm ' +
                 (i === sug.index ? 'bg-blue-50 text-blue-700' : 'text-stone-700')
@@ -455,6 +505,59 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
           ))}
         </div>
       )}
+      {markdownNotice && (
+        <div role="status" className="pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-md border border-stone-200 bg-[var(--surface-elevated)] px-3 py-1.5 text-xs text-stone-600 shadow-sm">
+          {markdownNotice}
+        </div>
+      )}
+      {pendingMarkdownImport && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/20 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="markdown-import-title"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && !markdownImporting) setPendingMarkdownImport(null)
+          }}
+        >
+          <div className="w-full max-w-sm rounded-lg border border-stone-200 bg-[var(--surface-elevated)] p-4 text-stone-700 shadow-xl">
+            <h3 id="markdown-import-title" className="font-medium text-stone-900">导入 Markdown</h3>
+            <p className="mt-2 text-sm">{pendingMarkdownImport.fileName} · {pendingMarkdownImport.content.length} 个顶层块</p>
+            {pendingMarkdownImport.preview && (
+              <pre className="mt-3 max-h-28 overflow-auto whitespace-pre-wrap rounded-md bg-stone-50 p-2 text-xs leading-5 text-stone-600">{pendingMarkdownImport.preview}</pre>
+            )}
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-xs leading-5 text-stone-500">
+              <li>默认以文件名新建独立工作文档，不修改当前内容</li>
+              <li>也可明确选择追加到当前光标，并用一次撤销移除</li>
+              <li>外部或相对图片链接按原地址保留，不自动上传</li>
+            </ul>
+            {markdownImportError && (
+              <p role="alert" className="mt-3 rounded-md bg-red-50 px-2.5 py-2 text-xs leading-5 text-red-700">
+                {markdownImportError}
+              </p>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" disabled={markdownImporting} onClick={() => setPendingMarkdownImport(null)} className="rounded-md px-3 py-1.5 text-sm text-stone-500 hover:bg-stone-100 disabled:opacity-40">取消</button>
+              <button type="button" disabled={markdownImporting} onClick={confirmMarkdownImport} className="rounded-md border border-stone-200 px-3 py-1.5 text-sm text-stone-600 hover:bg-stone-100 disabled:opacity-40">追加到当前</button>
+              <button
+                ref={markdownCreateButtonRef}
+                type="button"
+                disabled={markdownImporting || !onCreateImportedDocument}
+                onClick={createMarkdownImportDocument}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  createMarkdownImportDocument()
+                }}
+                className="rounded-md bg-[var(--btn-bg)] px-3 py-1.5 text-sm text-[var(--btn-fg)] hover:bg-[var(--btn-bg-hover)] disabled:opacity-40"
+              >
+                {markdownImporting ? '正在新建…' : '新建文档'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <input
         ref={fileInputRef}
         type="file"
@@ -463,6 +566,17 @@ export default function DocEditor({ content, onChange, placeholder = '写点什�
         onChange={(e) => {
           const file = e.target.files?.[0]
           if (file && uploaderId) insertImageFromFile(editor.view, file, uploaderId)
+          e.target.value = ''
+        }}
+      />
+      <input
+        ref={markdownFileInputRef}
+        type="file"
+        accept=".md,.markdown,text/markdown,text/plain"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          prepareMarkdownImport(file)
           e.target.value = ''
         }}
       />

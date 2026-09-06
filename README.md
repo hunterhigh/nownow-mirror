@@ -1,5 +1,7 @@
 # NowNow 🐰
 
+> 本工作副本用于个人／小团队效率工具定制。先看 [定制项目工作台](docs/README.md) 与 [环境基线](docs/baseline.md)；以下保留原项目介绍，安装／部署配置不能直接作为定制版环境使用。
+
 **A shared notebook for your whole team.** Every member gets their own set of Apple Notes-style rich-text pages, naturally organized into Today / This Week / This Month / Stash; everyone can read each other's pages (unless a block is marked private). A note first, a system second.
 
 No kanban boards, no ticket workflows — write your thoughts down, @ a teammate, and things start moving.

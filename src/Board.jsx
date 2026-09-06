@@ -10,8 +10,9 @@ import { supabase } from './lib/supabase'
 import { friendlyDbError } from './lib/errors'
 import { inPeriod, offsetOf, periodHeader, periodRange } from './lib/period'
 import { loadMyMentions, loadMyCompletions, loadMentionFrequency } from './lib/docMentionsApi'
-import { forgetDocCacheForTags, warmCache } from './lib/resilientDocs'
+import { forgetDocCacheForTags, saveDocResilient, warmCache } from './lib/resilientDocs'
 import { periodKey } from './lib/periodKey'
+import { createMarkdownDocument } from './lib/markdownImport'
 import { archiveTag, createTag as createDocTag, loadDocTags, peekDocTags, rememberDocTags, renameTag as renameDocTag, updateTagOrder } from './lib/tagsApi'
 import NotificationsPage from './components/NotificationsPage'
 import FeedbackPage from './components/FeedbackPage'
@@ -192,7 +193,10 @@ export default function Board({ session }) {
   currentDocTagsScopeRef.current = currentDocTagsScope
   const docTagsScopeMatches = docTagsScope === currentDocTagsScope
   const cachedDocTagsInScope = pageUserId ? peekDocTags(pageUserId, channel) : undefined
-  const docTagsInScope = docTagsScopeMatches ? docTags : (cachedDocTagsInScope || [])
+  const docTagsInScope = useMemo(
+    () => (docTagsScopeMatches ? docTags : (cachedDocTagsInScope || [])),
+    [cachedDocTagsInScope, docTags, docTagsScopeMatches],
+  )
   const docTagsReadyInScope = docTagsScopeMatches ? docTagsReady : cachedDocTagsInScope !== undefined
   const selectedTagIdInScope = docTagsScopeMatches ? selectedTagId : null
   const selectedTag = useMemo(
@@ -482,6 +486,33 @@ export default function Board({ session }) {
       throw new Error(friendlyDbError(e))
     }
   }, [channel, docTagsInScope, docTagsReadyInScope, isMyPage, me?.id, selectDocTag])
+
+  const createImportedDocument = useCallback(async ({ fileName, json, text }) => {
+    if (!isMyPage || !me?.id) throw new Error('只能在自己的工作区导入文档')
+    if (!docTagsReadyInScope) throw new Error('文档数据层还没准备好，稍后再试')
+
+    try {
+      const created = await createMarkdownDocument({
+        owner: me.id,
+        section: channel,
+        periodKey: periodKey(channel, 0, baseDate),
+        fileName,
+        json,
+        text,
+        existingNames: docTagsInScope.map((tag) => tag.name),
+        sortOrder: docTagsInScope.length,
+        createTag: createDocTag,
+        saveDocument: saveDocResilient,
+      })
+      const next = [...docTagsInScope, created.tag]
+      rememberDocTags(me.id, channel, next)
+      setDocTags(next)
+      selectDocTag(created.id)
+      return created
+    } catch (error) {
+      throw new Error(friendlyDbError(error))
+    }
+  }, [baseDate, channel, docTagsInScope, docTagsReadyInScope, isMyPage, me?.id, selectDocTag])
 
   const deleteTag = useCallback(
     async (tagId) => {
@@ -1275,6 +1306,7 @@ export default function Board({ session }) {
                     mentionFreq={mentionFreq}
                     flashKey={flashDoc && flashDoc.section === channel ? flashDoc.periodKey : null}
                     refreshNonce={docRefreshNonce}
+                    onCreateImportedDocument={createImportedDocument}
                   />
                 )}
               </>

@@ -5,6 +5,8 @@ dist
 !.env.example
 !.env.*.example
 .DS_Store
+output/playwright/
+.playwright-cli/
 
 # DB backups (contain user data — never commit)
 scripts/.backup-env
@@ -13,3 +15,8 @@ backups/
 # Local staging/admin state (contains credentials or project links)
 .supabase-local/
 supabase/.temp/
+
+# Keep project plans, but not local orchestration logs or runtime state.
+.omx/*
+!.omx/plans/
+!.omx/drafts/

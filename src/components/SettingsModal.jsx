@@ -133,7 +133,7 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
         .order('period_key', { ascending: false })
       if (error) { setErr(friendlyDbError(error)); return }
       const SECS = { today: '今日', week: '本周', month: '本月', stash: '收集箱' }
-      const lines = [`# ${me.display_name} 的 NowNow`, '']
+      const lines = [`# ${me.display_name} 的观复`, '']
       for (const sec of ['today', 'week', 'month', 'stash']) {
         const docs = (data || []).filter((d) => d.section === sec)
         if (!docs.length) continue
@@ -147,7 +147,7 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
       const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
-      a.download = `nownow-${me.handle}.md`
+      a.download = `guanfu-${me.handle}.md`
       a.click()
       URL.revokeObjectURL(a.href)
     } finally {
