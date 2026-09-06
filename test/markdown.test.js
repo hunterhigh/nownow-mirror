@@ -134,6 +134,24 @@ describe('Markdown converter', () => {
     expect(markdown).toContain('- [x] done')
   })
 
+  it('round-trips nested task lists without flattening levels or checked states', () => {
+    const source = '- [ ] parent\n  - [x] child\n    - [ ] grandchild\n- [x] sibling'
+    const parsed = markdownToDocJson(source)
+    const tasks = findNodes(parsed, 'taskItem')
+    const root = parsed.content[0]
+    const nested = root.content[0].content.find((node) => node.type === 'taskList')
+    const deepNested = nested.content[0].content.find((node) => node.type === 'taskList')
+    const markdown = docJsonToMarkdown(parsed)
+    const reparsed = markdownToDocJson(markdown)
+
+    expect(tasks.map((node) => node.attrs.checked)).toEqual([false, true, false, true])
+    expect(nested.type).toBe('taskList')
+    expect(deepNested.type).toBe('taskList')
+    expect(markdown).toContain('  - [x] child')
+    expect(markdown).toContain('    - [ ] grandchild')
+    expect(normalizedDoc(reparsed)).toEqual(normalizedDoc(parsed))
+  })
+
   it('parses fenced code blocks with language metadata when a language is provided', () => {
     const json = markdownToDocJson('```js\nconst answer = 42\n```')
     const blocks = findNodes(json, 'codeBlock')

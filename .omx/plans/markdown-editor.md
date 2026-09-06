@@ -52,6 +52,26 @@
 
 下一切片继续验证 HTML／Markdown／纯文本／图片粘贴四路与嵌套列表，不将本切片单独描述为编辑器 P0 已完成。
 
+## 第六纵向切片结果 · 2026-09-06
+
+- 使用真实 paste DOM 事件与 Chromium 系统剪贴板验证 Markdown、HTML 和显式纯文本三路互不串路。
+- 图片检测从 React handler 提取为纯路由函数，生产继续调用原有 `insertImageFromFile`；自动测试覆盖所有启用／绕过条件。
+- 浏览器使用本地网络拦截验证图片 paste 后生成节点、模拟上传 200，并将 blob URL 换为公开 URL；未连接真实 Storage。
+- 嵌套任务父／子／孙层级、checked、往返及 sink／lift 全部纳入回归。
+- 回退架构审查 APPROVED；deslop 后全量回归为 9 个测试文件、102 条测试；lint 0 errors／2 warnings；构建和扩展空白检查通过。
+
+后续重点转向正式登录应用中的刷新／离线／导出再导入，以及真人 macOS 拼音、双拼和五笔；真实图片 Storage 持久化等待隔离环境。
+
+## 第七纵向切片结果 · 2026-09-06
+
+- 设置页聚合 Markdown 拼接提取到 `src/lib/markdownExport.js`，分组、空文档和不可变性可独立测试。
+- 导出再导入保留任务、私密 Callout、高亮和正文语义；明确不把单文件聚合描述为可恢复多文档边界的备份格式。
+- `resilientDocs` 新增离线保存 → 模块重载 → 草稿恢复 → 联网按原版本重放 → 清草稿的完整自动回归。
+- 正式 `DocBlock` 浏览器 harness 完成同一刷新闭环，网络全部本地拦截。
+- 回退架构审查 APPROVED；deslop 后全量回归为 10 个测试文件、107 条测试；lint 0 errors／2 warnings；构建与扩展空白检查通过。
+
+下一步仍需正式登录隔离环境验收、真实 Storage 和真人 macOS IME；完整多文档恢复包属于主计划 S9，而非继续膨胀编辑器组件。
+
 ## 现状判断
 
 保留现有 Tiptap、`doc_json`、Slash、离线保存、版本历史和隐私架构。Markdown 扩展、新建／追加导入、剪贴板与自动长文基线已经接入；当前主要缺口是真实 macOS 中文 IME 人工验收、独立文档长期数据模型和完整观复 UI。

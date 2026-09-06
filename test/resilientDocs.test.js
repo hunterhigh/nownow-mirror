@@ -33,6 +33,7 @@ const DOC = (t) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ ty
 let mod
 beforeEach(async () => {
   localStorage.clear()
+  Object.defineProperty(globalThis.navigator, 'onLine', { configurable: true, value: true })
   saveDoc.mockReset()
   loadDocWithMeta.mockReset()
   vi.resetModules()
@@ -133,6 +134,34 @@ describe('启动重放：带着自己的基准，不是当前基准', () => {
 
     // 如果这里是 null，就等于"无条件覆盖" —— 周末在手机上写的会被抹掉
     expect(saveDoc.mock.calls[0][0].expectedUpdatedAt).toBe('V_FRIDAY')
+  })
+})
+
+describe('离线刷新与恢复联网', () => {
+  it('跨模块重载保留草稿，并在联网后按原版本重放', async () => {
+    const args = { owner: 'u', section: 'today', periodKey: '2026-09-06', tagId: null }
+    loadDocWithMeta.mockResolvedValue({ json: DOC('服务器原文'), updatedAt: 'V1' })
+    await mod.loadDocResilient(args.owner, args.section, args.periodKey, args.tagId)
+    Object.defineProperty(globalThis.navigator, 'onLine', { configurable: true, value: false })
+    const states = []
+
+    await mod.saveDocResilient({ ...args, json: DOC('离线修改'), text: '离线修改' }, (state) => states.push(state))
+    expect(states.at(-1)).toBe('offline')
+    expect(saveDoc).not.toHaveBeenCalled()
+    expect(JSON.parse(localStorage.getItem('nownow_draft:u/today/2026-09-06')).baseUpdatedAt).toBe('V1')
+
+    vi.resetModules()
+    const reloaded = await import('../src/lib/resilientDocs.js')
+    const restored = await reloaded.loadDocResilient(args.owner, args.section, args.periodKey, args.tagId)
+    expect(restored).toEqual(DOC('离线修改'))
+
+    Object.defineProperty(globalThis.navigator, 'onLine', { configurable: true, value: true })
+    saveDoc.mockResolvedValue({ id: 'doc-1', updatedAt: 'V2' })
+    await reloaded.flushPending()
+
+    expect(saveDoc).toHaveBeenCalledOnce()
+    expect(saveDoc.mock.calls[0][0]).toMatchObject({ text: '离线修改', expectedUpdatedAt: 'V1' })
+    expect(localStorage.getItem('nownow_draft:u/today/2026-09-06')).toBeNull()
   })
 })
 

@@ -4,9 +4,11 @@
 
 ## 当前开发快照 · 2026-09-06
 
-- 分支仍为 `codex/workstation-init`；初始化、观复产品文档和四个 Markdown 编辑器切片均在当前未提交工作树中，尚未提交、推送或部署。
+- 分支仍为 `codex/workstation-init`。2026-09-06 16:10 CST，本执行流程之外出现本地提交 `d602c45`（作者为仓库用户，主题为 `Refactor editor extensions and add Markdown import support`），收录 S0 与 S1.1 之前的工作；`origin/main` 仍停在 `29fd692`，没有发现推送。S1.2 改动仍在未提交工作树中。
 - S0 功能基线为 8 个测试文件、71 条测试。2026-09-06 使用项目级 Node 24.15.0 执行干净安装与全量验证：`npm ci --ignore-scripts --no-audit --no-fund` 安装 362 个依赖；71/71 测试通过；lint 0 errors／2 warnings；生产构建通过，主 JS 1,517.34 kB、gzip 476.47 kB，并保留超过 500 kB 的既有 chunk warning。
 - S1 第一个代码切片加入 Slash 注册表矩阵后，deslop 最终回归为 9 个测试文件、93 条测试；lint 仍为 0 errors／2 warnings；主 JS gzip 476.56 kB。
+- S1 第二个代码切片完成四类粘贴与嵌套任务后，当前为 9 个测试文件、102 条测试；lint 仍为 0 errors／2 warnings；主 JS gzip 476.66 kB。
+- S1 第三个代码切片加入导出再导入与离线刷新闭环后，当前为 10 个测试文件、107 条测试；lint 仍为 0 errors／2 warnings；主 JS gzip 476.69 kB。
 - 新增 `.nvmrc` 固定 Node `24.15.0`，因为系统 Node `24.13.0` 低于 jsdom 在 Node 24 线声明的最低 `24.15.0`。本轮使用独立下载的 Node 24.15.0 可执行文件直接启动 npm、Vitest、ESLint 与 Vite，没有改动系统 Node。
 - 磁盘曾在约 1.7 GiB 时触发 Vitest `ENOSPC`。用户分两次授权删除共 12 个可重建缓存；空间仍因工作区外占用在约 2.2–10 GiB 间波动，第二次删除后约 4.4 GiB。用户明确拒绝继续删除 Google 或其他缓存并要求进入开发，因此低空间只保留警告，实际发生 `ENOSPC` 时再停止。
 - 当前没有 `.env.local`、隔离 Supabase 或目标发布环境；没有执行数据库迁移、种子、备份、远程 schema preflight 或真实数据访问。

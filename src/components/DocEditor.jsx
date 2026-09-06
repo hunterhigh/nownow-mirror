@@ -15,7 +15,7 @@ import { uploadImage } from '../lib/storage'
 import { setUploadProgress, clearUploadProgress } from '../lib/uploadProgress'
 import { PrivateBlockLock, toggleBlockPrivate, isBlockPrivate } from '../lib/privateBlock'
 import { createMarkdownExtension, docJsonToText, markdownToDocJson } from '../lib/markdown'
-import { pasteLiteralText } from '../lib/editorClipboard'
+import { handleClipboardImagePaste, pasteLiteralText } from '../lib/editorClipboard'
 import { newMentionId } from '../lib/mentionIds'
 import { createPortableEditorExtensions } from '../lib/editorExtensions'
 import { MarkdownInputRules } from './MarkdownInputRules'
@@ -234,12 +234,12 @@ export default function DocEditor({ content, onChange, onCreateImportedDocument,
       },
       // 粘贴/拖拽图片 → 传 Storage → 插入（只在可写 + 有 uploaderId 时）
       handlePaste: (view, event) => {
-        if (!editable || !uploaderId) return false
-        const file = [...(event.clipboardData?.files || [])].find((f) => f.type.startsWith('image/'))
-        if (!file) return false
-        event.preventDefault()
-        insertImageFromFile(view, file, uploaderId)
-        return true
+        return handleClipboardImagePaste({
+          editable,
+          uploaderId,
+          event,
+          insertImage: (file) => insertImageFromFile(view, file, uploaderId),
+        })
       },
       handleDrop: (view, event) => {
         if (!editable || !uploaderId) return false

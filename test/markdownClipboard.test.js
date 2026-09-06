@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Editor } from '@tiptap/core'
 import { createMarkdownExtension } from '../src/lib/markdown'
 import { allowSuggestionCommand } from '../src/components/SlashCommand'
-import { pasteLiteralText } from '../src/lib/editorClipboard'
+import { handleClipboardImagePaste, pasteLiteralText } from '../src/lib/editorClipboard'
 import { createPortableEditorExtensions } from '../src/lib/editorExtensions'
 import { MarkdownInputRules } from '../src/components/MarkdownInputRules'
 
@@ -58,6 +58,22 @@ function typeCharacters(ed, text) {
   }
 }
 
+function dispatchPaste(ed, { html = '', text = '', files = [] }) {
+  const event = new window.Event('paste', { bubbles: true, cancelable: true })
+  Object.defineProperty(event, 'clipboardData', {
+    value: {
+      files,
+      getData: (type) => {
+        if (type === 'text/html') return html
+        if (type === 'text/plain' || type === 'text') return text
+        return ''
+      },
+    },
+  })
+  ed.view.dom.dispatchEvent(event)
+  return event
+}
+
 describe('Markdown editor input path', () => {
   it('parses pasted Markdown into semantic nodes instead of literal markers', () => {
     const ed = createEditor()
@@ -75,6 +91,34 @@ describe('Markdown editor input path', () => {
     expect(parsed.content.lastChild.type.name).toBe('taskList')
   })
 
+  it('parses an actual plain-text paste event as Markdown', () => {
+    const ed = createEditor()
+
+    dispatchPaste(ed, { text: '## 标题\n\n- [x] 完成' })
+    const json = ed.getJSON()
+
+    expect(json.content[0]).toMatchObject({ type: 'heading', attrs: { level: 2 } })
+    expect(json.content[1].type).toBe('taskList')
+    expect(json.content[1].content[0].attrs.checked).toBe(true)
+  })
+
+  it('prefers rich HTML over a conflicting Markdown plain-text fallback', () => {
+    const ed = createEditor()
+
+    dispatchPaste(ed, {
+      html: '<p><strong>HTML 加粗</strong></p>',
+      text: '## 不应解析成标题',
+    })
+    const first = ed.getJSON().content[0]
+
+    expect(first.type).toBe('paragraph')
+    expect(first.content[0]).toMatchObject({
+      type: 'text',
+      text: 'HTML 加粗',
+      marks: [{ type: 'bold' }],
+    })
+  })
+
   it('serializes copied rich content as Markdown when the clipboard option is enabled', () => {
     const ed = createEditor()
     ed.commands.setContent('## Heading\n\n**bold**')
@@ -87,6 +131,16 @@ describe('Markdown editor input path', () => {
 
     expect(markdown).toContain('## Heading')
     expect(markdown).toContain('**bold**')
+  })
+
+  it('keeps initial content outside the user undo history', () => {
+    const ed = createEditor('已加载')
+
+    ed.commands.insertContent('后的编辑')
+    expect(ed.getText()).toBe('后的编辑已加载')
+    expect(ed.commands.undo()).toBe(true)
+    expect(ed.getText()).toBe('已加载')
+    expect(ed.commands.undo()).toBe(false)
   })
 
   it('leaves explicit plain-text paste unformatted', () => {
@@ -102,6 +156,50 @@ describe('Markdown editor input path', () => {
     const paragraph = ed.getJSON().content[0]
     expect(paragraph.type).toBe('paragraph')
     expect(paragraph.content).toEqual([{ type: 'text', text: '## keep these markers' }])
+  })
+
+  it('keeps multiline Markdown markers literal in the explicit plain-text path', () => {
+    const ed = createEditor()
+    const originalClipboardEvent = globalThis.ClipboardEvent
+    globalThis.ClipboardEvent = window.Event
+    try {
+      pasteLiteralText(ed.view, '## 标题\n- [ ] 任务')
+    } finally {
+      globalThis.ClipboardEvent = originalClipboardEvent
+    }
+
+    expect(ed.getJSON().content.every((node) => node.type === 'paragraph')).toBe(true)
+    expect(ed.getText()).toContain('## 标题')
+    expect(ed.getText()).toContain('- [ ] 任务')
+  })
+
+  it('routes only eligible clipboard images to the existing image inserter', () => {
+    const image = new window.File(['image'], 'demo.png', { type: 'image/png' })
+    const text = new window.File(['text'], 'demo.txt', { type: 'text/plain' })
+    const insertImage = vi.fn()
+    const event = { clipboardData: { files: [text, image] }, preventDefault: vi.fn() }
+
+    expect(handleClipboardImagePaste({ editable: true, uploaderId: 'owner-1', event, insertImage })).toBe(true)
+    expect(event.preventDefault).toHaveBeenCalledOnce()
+    expect(insertImage).toHaveBeenCalledWith(image)
+  })
+
+  it.each([
+    { editable: false, uploaderId: 'owner-1', files: ['image'] },
+    { editable: true, uploaderId: null, files: ['image'] },
+    { editable: true, uploaderId: 'owner-1', files: ['text'] },
+  ])('does not intercept an ineligible image route: %j', ({ editable, uploaderId, files }) => {
+    const image = new window.File(['image'], 'demo.png', { type: 'image/png' })
+    const text = new window.File(['text'], 'demo.txt', { type: 'text/plain' })
+    const insertImage = vi.fn()
+    const event = {
+      clipboardData: { files: files.map((type) => (type === 'image' ? image : text)) },
+      preventDefault: vi.fn(),
+    }
+
+    expect(handleClipboardImagePaste({ editable, uploaderId, event, insertImage })).toBe(false)
+    expect(event.preventDefault).not.toHaveBeenCalled()
+    expect(insertImage).not.toHaveBeenCalled()
   })
 
   it('keeps Slash and mention suggestions disabled while an IME composition is active', () => {
@@ -206,5 +304,22 @@ describe('Markdown editor input path', () => {
     expect(applyFinalTypedCharacter(ed, final)).toBe(false)
     expect(ed.getJSON().content[0].type).toBe('paragraph')
     expect(ed.getText()).toBe(marker)
+  })
+
+  it('nests and lifts task items without flattening their checked state', () => {
+    const ed = createEditor()
+    ed.commands.setContent('- [ ] parent\n- [x] child')
+    let secondTaskPos = null
+    ed.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'taskItem' && node.attrs.checked) secondTaskPos = pos
+    })
+    expect(secondTaskPos).not.toBeNull()
+    ed.commands.setTextSelection(secondTaskPos + 2)
+
+    expect(ed.commands.sinkListItem('taskItem')).toBe(true)
+    const nested = ed.getJSON().content[0].content[0].content.find((node) => node.type === 'taskList')
+    expect(nested.content[0].attrs.checked).toBe(true)
+    expect(ed.commands.liftListItem('taskItem')).toBe(true)
+    expect(ed.getJSON().content[0].content.map((node) => node.attrs.checked)).toEqual([false, true])
   })
 })

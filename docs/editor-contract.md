@@ -57,6 +57,25 @@
 
 第五切片 deslop 后目标测试为 22/22；全量自动验证为 9 个测试文件、93 条测试全部通过；构建通过；lint 0 errors、2 个既有 warnings。完整编辑器 P0 仍需继续完成粘贴四路、嵌套结构、正式登录应用和真人 macOS IME 验收。
 
+### 第六纵向切片 · 2026-09-06
+
+- 普通 `⌘V` 的纯文本 Markdown 进入语义解析；同时含 `text/html` 与冲突纯文本回退时，HTML 加粗、链接和段落结构优先。
+- 显式 `⌘⇧V` 继续调用 literal-text 路径；多行 `##`、`- [ ]` 标记保持普通段落，不触发 Markdown 转换。
+- 图片判断提取为纯 clipboard 路由：只有可编辑、有 uploaderId 且 files 含图片时阻止默认粘贴并调用现有 inserter；只读、无 uploaderId 或非图片文件均不拦截。
+- 嵌套任务覆盖父／子／孙三层、同级任务与 checked 状态；Markdown 往返不扁平化，编辑器 sink／lift 不改变 checked。
+- 正式 `DocEditor` 的 Chromium 验收覆盖系统剪贴板 Markdown、系统剪贴板纯文本快捷键、`ClipboardItem` HTML、三层嵌套任务，以及图片即时节点和本地模拟上传 200／公开 URL 替换；控制台无运行错误。
+
+第六切片回退架构审查 APPROVED；deslop 后目标自动测试为 43/43，全量为 9 个测试文件、102 条测试全部通过；构建通过；lint 0 errors、2 个既有 warnings；已跟踪与本轮未跟踪文档的空白检查通过。图片结果只证明客户端路由和上传协议，真实 Supabase Storage 仍需隔离环境验收。
+
+### 第七纵向切片 · 2026-09-06
+
+- 设置页的全部文档导出拼接已提取为纯 `buildMarkdownExport`；固定按今日／本周／本月／收集箱分组，跳过空文档，不修改输入 JSON。
+- 聚合导出可重新解析任务 checked、私密 Callout 类型、高亮和普通正文；程序性初始加载不进入用户 Undo 历史，首次真实编辑可撤销回加载状态。
+- 离线恢复自动测试串联完整路径：基于 V1 加载、离线修改、本地草稿、模块重载模拟刷新、优先读取草稿、联网后以 V1 重放、成功后清除草稿。
+- 正式 `DocBlock` 的 Chromium harness 验证相同刷新闭环：重载后正文仍在，模拟联网 200 后草稿键清除且正文不变；请求全部本地拦截。步骤与结果见 `docs/evidence/s1.3-browser-recovery-2026-09-06.md`。
+
+第七切片回退架构审查 APPROVED；deslop 后目标自动测试为 46/46，全量为 10 个测试文件、107 条测试全部通过；构建通过；lint 0 errors、2 个既有 warnings；扩展空白检查通过。当前“全部导出”仍是单个聚合 Markdown，可恢复正文语义但不能恢复原文档边界、标题和导航位置；完整恢复包留到 S9。正式登录、真实 Supabase 和真实 Storage 仍未验收。
+
 ## 当前代码基线
 
 | 已存在 | 证据 | 结论 |
@@ -116,7 +135,7 @@ Slash 的最低键盘契约：输入查询、上下选择、Enter 执行、Esc �
 - 提供明确的“粘贴为 Markdown”能力，并支持识别多行 Markdown。
 - `Cmd/Ctrl+Shift+V` 继续执行纯文本粘贴。
 - 支持导入 UTF-8 `.md`；导入前展示范围、冲突和图片处理说明，不静默覆盖现有文档。
-- 支持单文档与全部文档 Markdown 导出。
+- 支持单文档与全部文档 Markdown 导出；聚合 Markdown 与可恢复多文档边界的完整备份必须明确区分。
 - 标准 Markdown 内容执行 `Markdown → JSON → Markdown → JSON` 后语义等价。
 
 ### 观复扩展的可携带规则

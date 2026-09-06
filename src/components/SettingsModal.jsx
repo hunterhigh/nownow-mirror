@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown, ChevronRight, Copy, Download, Link2, LogOut, Settings as SettingsIcon, UserPlus, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { friendlyDbError } from '../lib/errors'
-import { docJsonToMarkdown } from '../lib/markdown'
-
-const SECTION_LABELS = { today: '今日', week: '本周', month: '本月' }
+import { buildMarkdownExport } from '../lib/markdownExport'
 
 export default function SettingsModal({ onClose, me, email, allEntries, profiles = [], onProfileSaved, variant }) {
   const [handle, setHandle] = useState(me.display_name || me.handle)
@@ -132,19 +130,8 @@ export default function SettingsModal({ onClose, me, email, allEntries, profiles
         .eq('owner', me.id)
         .order('period_key', { ascending: false })
       if (error) { setErr(friendlyDbError(error)); return }
-      const SECS = { today: '今日', week: '本周', month: '本月', stash: '收集箱' }
-      const lines = [`# ${me.display_name} 的观复`, '']
-      for (const sec of ['today', 'week', 'month', 'stash']) {
-        const docs = (data || []).filter((d) => d.section === sec)
-        if (!docs.length) continue
-        lines.push(`## ${SECS[sec] || sec}`, '')
-        for (const d of docs) {
-          const md = docJsonToMarkdown(d.doc_json).trim()
-          if (!md) continue
-          lines.push(sec === 'stash' ? '' : `### ${d.period_key}`, '', md, '')
-        }
-      }
-      const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
+      const markdown = buildMarkdownExport({ displayName: me.display_name, docs: data || [] })
+      const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
       a.download = `guanfu-${me.handle}.md`

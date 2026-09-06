@@ -1,8 +1,11 @@
 # S0 固定 Node 验证证据
 
-执行时间：2026-09-06 13:46 CST  
-工作目录：`/Users/raozhiheng/Desktop/main/workstation`  
-分支：`codex/workstation-init`  
+执行时间：2026-09-06 13:46 CST
+
+工作目录：`/Users/raozhiheng/Desktop/main/workstation`
+
+分支：`codex/workstation-init`
+
 总退出码：0
 
 ## 可复制命令
